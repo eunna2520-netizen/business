@@ -73,8 +73,23 @@ def add_workrate_sheet(wb):
     ws.column_dimensions["A"].width = 70
     ws.column_dimensions["C"].width = 20
     ws.column_dimensions["D"].width = 22
+    cats, first = [], {}
+    for i, (key, *_r) in enumerate(rows):
+        c = key.split(">")[0]
+        if c not in first:
+            first[c] = [i, 0]
+            cats.append(c)
+        first[c][1] += 1
+    for j, h in enumerate(["분류 필터", "시작 위치", "개수"]):
+        ws.cell(1, 6 + j).value = h
+    _hdr(ws, 1, range(6, 9))
+    ws.cell(2, 6).value, ws.cell(2, 7).value, ws.cell(2, 8).value = "전체", 1, len(rows)
+    for j, c in enumerate(cats):
+        ws.cell(3 + j, 6).value, ws.cell(3 + j, 7).value, ws.cell(3 + j, 8).value = c, first[c][0] + 1, first[c][1]
+        assert [k.split(">")[0] for k, *_r in rows[first[c][0]:first[c][0] + first[c][1]]] == [c] * first[c][1], c
+    ws.column_dimensions["F"].width = 16
     ws.cell(len(rows) + 3, 1).value = "※ 가이드라인 부록 4 '토목분야 > 도로시설물'을 옮긴 것입니다. '일/개소' 형태는 1일 작업량을 1÷일수로 환산했습니다. 표에 없는 공종은 공종표에 직접 입력하세요."
-    return len(rows) + 1
+    return len(rows) + 1, len(cats) + 1
 
 
 def add_preset_sheet(wb):
@@ -167,7 +182,7 @@ def add_facility_sheet(wb):
     return ws
 
 
-def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types):
+def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     ws = wb.create_sheet("공기산정(1일작업량)")
     ws["A1"] = "1일 작업량에 의한 공사기간 산정 (가이드라인 제2장)"
     ws["A1"].font = Font(bold=True, size=14)
@@ -248,7 +263,16 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types):
     K, L, D_, J_ = (f"$K${first}:$K${last}", f"$L${first}:$L${last}", f"$D${first}:$D${last}", f"$J${first}:$J${last}")
     n_rows = 15
     ws.cell(wt - 1, 6).value = "※ 공종 삭제=칸 지우기, 추가=빈 줄에서 목록 선택. 1일 작업량은 덮어써서 수정 가능."
-    dv4 = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$A$2:$A${n_rate}", allow_blank=True)
+    ws["A26"], ws["B26"] = "공종 목록 분류 (선택 범위 좁히기)", "전체"
+    ws["A26"].font = BOLD
+    ws["B26"].fill, ws["B26"].border = INPUT, BOX
+    dvc = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$F$2:$F${n_cat + 1}", allow_blank=False)
+    ws.add_data_validation(dvc); dvc.add("B26")
+    ws["C26"] = "※ 분류를 고르면 아래 공종 칸의 목록이 그 분류의 공종만 보입니다."
+    cat_m = f"MATCH($B$26,'1일작업량(토목)'!$F$2:$F${n_cat + 1},0)"
+    dv4 = DataValidation(type="list", formula1=(
+        f"=OFFSET('1일작업량(토목)'!$A$1,INDEX('1일작업량(토목)'!$G$2:$G${n_cat + 1},{cat_m}),0,"
+        f"INDEX('1일작업량(토목)'!$H$2:$H${n_cat + 1},{cat_m}),1)"), allow_blank=True)
     dv4.showErrorMessage = False
     ws.add_data_validation(dv4)
     for i in range(n_rows):
