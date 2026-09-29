@@ -88,6 +88,10 @@ def add_workrate_sheet(wb):
         ws.cell(3 + j, 6).value, ws.cell(3 + j, 7).value, ws.cell(3 + j, 8).value = c, first[c][0] + 1, first[c][1]
         assert [k.split(">")[0] for k, *_r in rows[first[c][0]:first[c][0] + first[c][1]]] == [c] * first[c][1], c
     ws.column_dimensions["F"].width = 16
+    from openpyxl.workbook.defined_name import DefinedName
+    for name, (st, cnt) in [("전체", (0, len(rows)))] + [(c, tuple(first[c])) for c in cats]:
+        ref = f"'1일작업량(토목)'!$A${st + 2}:$A${st + 1 + cnt}"
+        wb.defined_names[name] = DefinedName(name, attr_text=ref)
     ws.cell(len(rows) + 3, 1).value = "※ 가이드라인 부록 4 '토목분야 > 도로시설물'을 옮긴 것입니다. '일/개소' 형태는 1일 작업량을 1÷일수로 환산했습니다. 표에 없는 공종은 공종표에 직접 입력하세요."
     return len(rows) + 1, len(cats) + 1
 
@@ -269,10 +273,7 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     dvc = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$F$2:$F${n_cat + 1}", allow_blank=False)
     ws.add_data_validation(dvc); dvc.add("B26")
     ws["C26"] = "※ 분류를 고르면 아래 공종 칸의 목록이 그 분류의 공종만 보입니다."
-    cat_m = f"MATCH($B$26,'1일작업량(토목)'!$F$2:$F${n_cat + 1},0)"
-    dv4 = DataValidation(type="list", formula1=(
-        f"=OFFSET('1일작업량(토목)'!$A$1,INDEX('1일작업량(토목)'!$G$2:$G${n_cat + 1},{cat_m}),0,"
-        f"INDEX('1일작업량(토목)'!$H$2:$H${n_cat + 1},{cat_m}),1)"), allow_blank=True)
+    dv4 = DataValidation(type="list", formula1="=INDIRECT($B$26)", allow_blank=True)
     dv4.showErrorMessage = False
     ws.add_data_validation(dv4)
     for i in range(n_rows):
