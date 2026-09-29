@@ -22,6 +22,11 @@ FACILITIES = [
 ]
 VARS = [("L", "도로연장(m)"), ("W", "도로폭원(m)"), ("BL", "교량연장(m)"), ("D", "관경(mm)"),
         ("S", "양수장/배수장/가압장 개수"), ("SL", "하수도 연장(m)"), ("RL", "궤도연장(m)")]
+def openpyxl_col(n):
+    from openpyxl.utils import get_column_letter
+    return get_column_letter(n)
+
+
 # 가이드라인 부록 2·3의 조건 순서 (data/weather.json과 같다). 기본 적용: 철근콘크리트공사 예시
 COND_DEFAULT_ON = {1, 5, 6, 9, 13}
 
@@ -70,6 +75,19 @@ def add_workrate_sheet(wb):
     ws.column_dimensions["D"].width = 22
     ws.cell(len(rows) + 3, 1).value = "※ 가이드라인 부록 4 '토목분야 > 도로시설물'을 옮긴 것입니다. '일/개소' 형태는 1일 작업량을 1÷일수로 환산했습니다. 표에 없는 공종은 공종표에 직접 입력하세요."
     return len(rows) + 1
+
+
+def add_preset_sheet(wb):
+    import presets_civil
+    ws = wb.create_sheet("공종프리셋")
+    ws["A18"] = "※ 공사 유형별 대표 공종(작업 순서)입니다. '공기산정(1일작업량)' 시트의 공사 유형을 고르면 공종표가 이 목록으로 채워집니다. 여기서 항목을 고쳐도 됩니다."
+    for j, (name, items) in enumerate(presets_civil.PRESETS.items(), 1):
+        ws.cell(1, j).value = name
+        ws.cell(1, j).fill, ws.cell(1, j).font = HEAD, BOLD
+        for i, it in enumerate(items):
+            ws.cell(2 + i, j).value = it
+        ws.column_dimensions[ws.cell(1, j).column_letter].width = 46
+    return len(presets_civil.PRESETS)
 
 
 def add_facility_sheet(wb):
@@ -149,7 +167,7 @@ def add_facility_sheet(wb):
     return ws
 
 
-def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate):
+def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types):
     ws = wb.create_sheet("공기산정(1일작업량)")
     ws["A1"] = "1일 작업량에 의한 공사기간 산정 (가이드라인 제2장)"
     ws["A1"].font = Font(bold=True, size=14)
@@ -167,6 +185,13 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate):
         ws[a], ws[b] = lab, val
         ws[a].font = BOLD
         ws[b].fill, ws[b].border = INPUT, BOX
+    ws["A9"], ws["B9"] = "공사 유형 (공종 자동 구성)", "하수도 관로공사"
+    ws["A9"].font = BOLD
+    ws["B9"].fill, ws["B9"].border = INPUT, BOX
+    last_col = openpyxl_col(n_types)
+    dvt = DataValidation(type="list", formula1=f"=공종프리셋!$A$1:${last_col}$1", allow_blank=False)
+    ws.add_data_validation(dvt); dvt.add("B9")
+    ws["C9"] = "※ 유형을 바꾸면 아래 공종표가 그 유형의 대표 공종으로 바뀝니다. 수량은 다시 입력하세요."
     ws["C4"] = f'=IFERROR("지점코드 "&INDEX(지점목록!$C$2:$C${n_list},MATCH(B4,지점목록!$A$2:$A${n_list},0)),"지점명을 확인하세요")'
     ws["C5"] = "※ 본공사 착수 월의 1일부터 계산 (준비기간은 그 이전)"
     dv = DataValidation(type="list", formula1=f"=지점목록!$A$2:$A${n_list}", allow_blank=False)
@@ -222,24 +247,19 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate):
     ws.add_data_validation(dv3)
     K, L, D_, J_ = (f"$K${first}:$K${last}", f"$L${first}:$L${last}", f"$D${first}:$D${last}", f"$J${first}:$J${last}")
     n_rows = 15
-    import workrates_civil
-    keys = [k for k, *_ in workrates_civil.build()]
-    pick = lambda sub: next(k for k in keys if sub in k)
-    demo = [(pick("가설울타리"), 300), (pick("흙쌓기-노체"), 5000), (pick("보조기층"), 2000),
-            (pick("기층 (시공폭 3m 이상, 두께 5"), 4200), (pick("중간층/표층"), 4200)]
-    ws.cell(wt - 1, 6).value = "※ 예시 값입니다. 덮어써서 사용하세요."
+    ws.cell(wt - 1, 6).value = "※ 공종 삭제=칸 지우기, 추가=빈 줄에서 목록 선택. 1일 작업량은 덮어써서 수정 가능."
     dv4 = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$A$2:$A${n_rate}", allow_blank=True)
     dv4.showErrorMessage = False
     ws.add_data_validation(dv4)
     for i in range(n_rows):
         r = wt + 1 + i
-        d = demo[i] if i < len(demo) else (None, None)
-        ws.cell(r, 1).value, ws.cell(r, 2).value = d
+        ws.cell(r, 1).value = (f"=IFERROR(INDEX(공종프리셋!$A$2:${last_col}$16,{i + 1},"
+                               f"MATCH($B$9,공종프리셋!$A$1:${last_col}$1,0))&\"\",\"\")")
         dv4.add(ws.cell(r, 1))
         m = f"MATCH($A{r},'1일작업량(토목)'!$A$2:$A${n_rate},0)"
         ws.cell(r, 3).value = f"=IFERROR(INDEX('1일작업량(토목)'!$B$2:$B${n_rate},{m}),\"\")"
         ws.cell(r, 4).value = f"=IFERROR(INDEX('1일작업량(토목)'!$C$2:$C${n_rate},{m}),\"\")"
-        ws.cell(r, 5).value = "Y" if d[0] else None
+        ws.cell(r, 5).value = f'=IF(A{r}="","","Y")'
         dv3.add(ws.cell(r, 5))
         for c in (1, 2, 3, 4, 5):
             ws.cell(r, c).fill = INPUT

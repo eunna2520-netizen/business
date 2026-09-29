@@ -85,8 +85,9 @@ main["AA20"].value  # 표시용 셀 확인만
 import sheets_civil
 n_hol = sheets_civil.add_holiday_sheet(wb)
 n_rate = sheets_civil.add_workrate_sheet(wb)
+n_types = sheets_civil.add_preset_sheet(wb)
 sheets_civil.add_facility_sheet(wb)
-sheets_civil.add_workday_sheet(wb, n, np_, n_hol, n_rate)
+sheets_civil.add_workday_sheet(wb, n, np_, n_hol, n_rate, n_types)
 wb.calculation.fullCalcOnLoad = True
 wb.save("공기산정_2026기준.xlsx")
 print("saved", n - 1, "data rows")
