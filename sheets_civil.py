@@ -54,6 +54,24 @@ def add_holiday_sheet(wb, old_sheet="별표1-공유일"):
     return ws.max_row  # 마지막 행
 
 
+def add_workrate_sheet(wb):
+    import workrates_civil
+    ws = wb.create_sheet("1일작업량(토목)")
+    ws.append(["선택명 (분류>공종 (작업조건))", "수량 단위", "1일 작업량 (수량/일)", "원문 표기 (부록 4)"])
+    _hdr(ws, 1, range(1, 5))
+    rows = workrates_civil.build()
+    for key, unit, rate, src in rows:
+        ws.append([key, unit, rate, src])
+    for r in range(2, len(rows) + 2):
+        ws.cell(r, 3).number_format = "#,##0.0000"
+    ws.freeze_panes = "A2"
+    ws.column_dimensions["A"].width = 70
+    ws.column_dimensions["C"].width = 20
+    ws.column_dimensions["D"].width = 22
+    ws.cell(len(rows) + 3, 1).value = "※ 가이드라인 부록 4 '토목분야 > 도로시설물'을 옮긴 것입니다. '일/개소' 형태는 1일 작업량을 1÷일수로 환산했습니다. 표에 없는 공종은 공종표에 직접 입력하세요."
+    return len(rows) + 1
+
+
 def add_facility_sheet(wb):
     ws = wb.create_sheet("시설물별공기(토목)")
     ws["A1"] = "토목 시설물 공사기간 산정 (가이드라인 부록 5 산정공식)"
@@ -69,7 +87,7 @@ def add_facility_sheet(wb):
     dv = DataValidation(type="list", formula1='"' + ",".join(f[0] for f in FACILITIES) + '"', allow_blank=False)
     ws.add_data_validation(dv); dv.add("B4")
 
-    ft = 22  # 시설물 표 시작 행 (헤더)
+    ft = 24  # 시설물 표 시작 행 (헤더)
     for i, (code, label) in enumerate(VARS):
         r = 6 + i
         ws.cell(r, 1).value = f"{label} {code}"
@@ -79,8 +97,8 @@ def add_facility_sheet(wb):
     for r in list(range(4, 6)) + list(range(6, 13)):
         ws.cell(r, 1).font = BOLD
         ws.cell(r, 2).fill, ws.cell(r, 2).border = INPUT, BOX
-    ws["A14"], ws["B14"] = "준비기간 (일)", 60
-    ws["A15"], ws["B15"] = "정리기간 (일)", 30
+    ws["A14"], ws["B14"] = "준비기간 (일, 직접 입력)", 0
+    ws["A15"], ws["B15"] = "정리기간 (일, 직접 입력)", 0
     for r in (14, 15):
         ws.cell(r, 1).font = BOLD
         ws.cell(r, 2).fill, ws.cell(r, 2).border = INPUT, BOX
@@ -119,6 +137,10 @@ def add_facility_sheet(wb):
             ws.cell(r, 6 + k).value = f
         for c in range(1, 13):
             ws.cell(r, c).border = BOX
+    ws["A21"] = "※ 산정공식은 과거 공사 실적의 회귀식(평균값)이라, 소규모 공사는 실제 공기보다 크게 나올 수 있습니다. 이 값은 적정성 검토용이며 최종 공기는 1일 작업량 방식으로 산정하세요."
+    ws["A21"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A21:F21")
+    ws.row_dimensions[21].height = 32
     ws.cell(ft + 8, 1).value = "※ ln은 자연로그. 상수도는 다종의 관일 때 물량이 가장 많거나 가장 큰 관경을 적용. 도로포장은 토공+교량이 함께 있으면 '도로(토공+교량)' 공식을 적용. 철도(궤도)는 설비 부분 공기 별도."
     ws.column_dimensions["A"].width = 30
     ws.column_dimensions["B"].width = 62
@@ -127,7 +149,7 @@ def add_facility_sheet(wb):
     return ws
 
 
-def add_workday_sheet(wb, n_data, n_list, n_hol):
+def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate):
     ws = wb.create_sheet("공기산정(1일작업량)")
     ws["A1"] = "1일 작업량에 의한 공사기간 산정 (가이드라인 제2장)"
     ws["A1"].font = Font(bold=True, size=14)
@@ -192,7 +214,7 @@ def add_workday_sheet(wb, n_data, n_list, n_hol):
     wt = sr + 3
     ws.cell(wt - 1, 1).value = "▼ 공종별 작업량 입력 (주공정=Y인 공종만 공사기간에 합산, 위에서 아래 순서로 이어서 시공)"
     ws.cell(wt - 1, 1).font = BOLD
-    heads = ["공종", "작업수량", "단위", "1일 작업량", "주공정(Y/N)", "작업일수", "누적 작업일수", "경과일수(누적)", "공종별 공사기간", "비작업일수"]
+    heads = ["공종 (목록 선택 또는 직접 입력)", "작업수량", "단위", "1일 작업량 (수정 가능)", "주공정(Y/N)", "작업일수", "누적 작업일수", "경과일수(누적)", "공종별 공사기간", "비작업일수"]
     for j, h in enumerate(heads):
         ws.cell(wt, 1 + j).value = h
     _hdr(ws, wt, range(1, 11))
@@ -200,18 +222,28 @@ def add_workday_sheet(wb, n_data, n_list, n_hol):
     ws.add_data_validation(dv3)
     K, L, D_, J_ = (f"$K${first}:$K${last}", f"$L${first}:$L${last}", f"$D${first}:$D${last}", f"$J${first}:$J${last}")
     n_rows = 15
-    demo = [("철골세우기", 4000, "톤", 50), ("데크플레이트 설치", 33800, "㎡", 440), ("철근 가공/조립", 940, "톤", 12),
-            ("형틀 조립", 24500, "㎡", 320), ("콘크리트 타설", 10300, "㎥", 930)]
+    import workrates_civil
+    keys = [k for k, *_ in workrates_civil.build()]
+    pick = lambda sub: next(k for k in keys if sub in k)
+    demo = [(pick("가설울타리"), 300), (pick("흙쌓기-노체"), 5000), (pick("보조기층"), 2000),
+            (pick("기층 (시공폭 3m 이상, 두께 5"), 4200), (pick("중간층/표층"), 4200)]
+    ws.cell(wt - 1, 6).value = "※ 예시 값입니다. 덮어써서 사용하세요."
+    dv4 = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$A$2:$A${n_rate}", allow_blank=True)
+    dv4.showErrorMessage = False
+    ws.add_data_validation(dv4)
     for i in range(n_rows):
         r = wt + 1 + i
-        d = demo[i] if i < len(demo) else (None, None, None, None)
-        for j, v in enumerate(d):
-            ws.cell(r, 1 + j).value = v
+        d = demo[i] if i < len(demo) else (None, None)
+        ws.cell(r, 1).value, ws.cell(r, 2).value = d
+        dv4.add(ws.cell(r, 1))
+        m = f"MATCH($A{r},'1일작업량(토목)'!$A$2:$A${n_rate},0)"
+        ws.cell(r, 3).value = f"=IFERROR(INDEX('1일작업량(토목)'!$B$2:$B${n_rate},{m}),\"\")"
+        ws.cell(r, 4).value = f"=IFERROR(INDEX('1일작업량(토목)'!$C$2:$C${n_rate},{m}),\"\")"
         ws.cell(r, 5).value = "Y" if d[0] else None
         dv3.add(ws.cell(r, 5))
         for c in (1, 2, 3, 4, 5):
             ws.cell(r, c).fill = INPUT
-        ws.cell(r, 6).value = f'=IF(AND(ISNUMBER(B{r}),ISNUMBER(D{r}),N(D{r})>0),ROUNDUP(B{r}/D{r},0),"")'
+        ws.cell(r, 6).value = f'=IF(AND(ISNUMBER(B{r}),ISNUMBER(D{r}),N(D{r})>0),ROUNDUP(ROUND(B{r}/D{r},6),0),"")'
         ws.cell(r, 7).value = f'=IF(F{r}="","",N(G{r - 1})+IF(E{r}="Y",F{r},0))'
         ws.cell(r, 8).value = (
             f'=IF(G{r}="","",IF(G{r}=0,0,IF(G{r}>INDEX({K},60)+INDEX({J_},60),"기간초과",'
@@ -274,8 +306,8 @@ def add_workday_sheet(wb, n_data, n_list, n_hol):
             ws.cell(r, c).border = BOX
     ws.cell(last + 2, 1).value = ("※ 마지막 달은 '비작업일수 = 총 비작업일수 × 잔여작업일수 ÷ 그 달 총 작업가능일수' 규칙(가이드라인 1150행)으로 안분합니다. "
                                   "가이드라인 예시(철골세우기)는 20+23+12+10+10을 74일로 적었으나 실제 합은 75일입니다.")
-    ws.column_dimensions["A"].width = 36
-    ws.column_dimensions["B"].width = 34
+    ws.column_dimensions["A"].width = 60
+    ws.column_dimensions["B"].width = 20
     for col in "CDEFGHIJKL":
         ws.column_dimensions[col].width = 14
     return ws
