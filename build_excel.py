@@ -5,7 +5,9 @@ import openpyxl
 from openpyxl.styles import Alignment, Font
 from openpyxl.worksheet.datavalidation import DataValidation
 
-conds = json.load(open("data/weather.json", encoding="utf-8"))
+import sys
+conds = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "data/weather.json", encoding="utf-8"))
+import sys
 wb = openpyxl.load_workbook("data/template.xlsx")
 
 # 1) 전국 지점 데이터 시트
