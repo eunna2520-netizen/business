@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>공기산정 엑셀 생성</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:16px}
+label{display:block;margin:14px 0 4px;font-weight:600}
+input,button{width:100%;padding:12px;font-size:16px;box-sizing:border-box}
+button{margin-top:20px;background:#1a56db;color:#fff;border:0;border-radius:6px}
+button:disabled{background:#888}
+</style></head><body>
+<h1>공기산정 엑셀 생성</h1>
+<p>기상청 관측자료로 별표2(제주·서귀포 비작업일수)를 채운 엑셀을 내려받습니다.</p>
+<form method="post" action="/generate" onsubmit="b.disabled=true;b.textContent='생성 중... (1분 정도 걸립니다)'">
+<label>공사 시작일</label><input type="date" name="start" required>
+<label>공사 종료일</label><input type="date" name="end" required>
+<label>기상자료 마지막 연도</label><input type="number" name="end_year" value="{{ default_end }}" required>
+<label>평균 낼 연수</label><input type="number" name="years" value="{{ default_years }}" min="1" max="30" required>
+<button id="b" name="b">엑셀 만들기</button>
+</form></body></html>
