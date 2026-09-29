@@ -82,6 +82,10 @@ main["Y27"], main["Z27"] = "='별표2-비작업일수'!A19", "='별표2-비작�
 main["AN21"] = "=SUM(AB21:AM21)"
 main["AA20"].value  # 표시용 셀 확인만
 
+import sheets_civil
+n_hol = sheets_civil.add_holiday_sheet(wb)
+sheets_civil.add_facility_sheet(wb)
+sheets_civil.add_workday_sheet(wb, n, np_, n_hol)
 wb.calculation.fullCalcOnLoad = True
 wb.save("공기산정_2026기준.xlsx")
 print("saved", n - 1, "data rows")
