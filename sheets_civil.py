@@ -263,10 +263,10 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     wt = sr + 3
     ws.cell(wt - 1, 1).value = "▼ 공종별 작업량 입력 (주공정=Y인 공종만 공사기간에 합산, 위에서 아래 순서로 이어서 시공)"
     ws.cell(wt - 1, 1).font = BOLD
-    heads = ["공종 (목록 선택 또는 직접 입력)", "작업수량", "단위", "1일 작업량 (수정 가능)", "주공정(Y/N)", "작업일수", "누적 작업일수", "경과일수(누적)", "공종별 공사기간", "비작업일수"]
+    heads = ["공종 (목록 선택 또는 직접 입력)", "작업수량", "단위", "1일 작업량 (수정 가능)", "주공정(Y/N)", "작업일수", "누적 작업일수", "경과일수(누적)", "공종별 공사기간", "비작업일수", "부록4 원문 표기"]
     for j, h in enumerate(heads):
         ws.cell(wt, 1 + j).value = h
-    _hdr(ws, wt, range(1, 11))
+    _hdr(ws, wt, range(1, 12))
     dv3 = DataValidation(type="list", formula1='"Y,N"', allow_blank=False)
     ws.add_data_validation(dv3)
     K, L, D_, J_ = (f"$K${first}:$K${last}", f"$L${first}:$L${last}", f"$D${first}:$D${last}", f"$J${first}:$J${last}")
@@ -301,7 +301,8 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
             f'*INDEX({D_},MATCH(G{r},{K},1))/INDEX({J_},MATCH(G{r},{K},1)))))')
         ws.cell(r, 9).value = f'=IF(F{r}="","",IF(E{r}="Y",IF(ISNUMBER(H{r}),ROUND(H{r}-N(H{r - 1}),1),"기간초과"),"-"))'
         ws.cell(r, 10).value = f'=IF(ISNUMBER(I{r}),ROUND(I{r}-F{r},1),"")'
-        for c in range(1, 11):
+        ws.cell(r, 11).value = f"=IFERROR(INDEX('1일작업량(토목)'!$D$2:$D${n_rate},{m}),\"\")"
+        for c in range(1, 12):
             ws.cell(r, c).border = BOX
     t1, t2 = wt + 1, wt + n_rows
     res = t2 + 2
@@ -360,4 +361,5 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     ws.column_dimensions["B"].width = 20
     for col in "CDEFGHIJKL":
         ws.column_dimensions[col].width = 14
+    ws.column_dimensions["K"].width = 18
     return ws
