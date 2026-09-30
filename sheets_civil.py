@@ -219,7 +219,7 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     ws.merge_cells("A2:L2")
     ws.row_dimensions[2].height = 60
 
-    for a, lab, b, val in [("A4", "기상 지점", "B4", "서울"), ("A5", "본공사 착수 연도", "B5", 2026),
+    for a, lab, b, val in [("A4", "기상 지점", "B4", "제주"), ("A5", "본공사 착수 연도", "B5", 2026),
                            ("A6", "본공사 착수 월", "B6", 7), ("A7", "준비기간 (일)", "B7", "='시설물별공기(토목)'!B14"),
                            ("A8", "정리기간 (일)", "B8", "='시설물별공기(토목)'!B15")]:
         ws[a], ws[b] = lab, val

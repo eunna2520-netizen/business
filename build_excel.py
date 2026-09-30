@@ -10,10 +10,12 @@ conds = json.load(open(sys.argv[1] if len(sys.argv) > 1 else "data/weather.json"
 import sys
 wb = openpyxl.load_workbook("data/template.xlsx")
 
-# 1) 전국 지점 데이터 시트
+# 1) 제주도 지점 데이터 시트
 ds = wb.create_sheet("기상자료")
 ds.append(["지점코드", "행정구역", "지점명", "조건번호", "조건", *[f"{m}월" for m in range(1, 13)], "소계"])
-codes = sorted(conds[0]["stations"], key=lambda k: (conds[0]["stations"][k]["region"], conds[0]["stations"][k]["name"]))
+KEEP = ["184", "189", "185", "188"]  # 제주, 서귀포, 고산, 성산 (제주도 지점만 사용)
+codes = [c for c in KEEP if c in conds[0]["stations"]]
+assert len(codes) == 4, codes
 for code in codes:
     for i, c in enumerate(conds, 1):
         s = c["stations"][code]
@@ -52,8 +54,34 @@ slot_label = [
     "일강수량 : 5㎜ 이상", "일강수량 : 10㎜ 이상", "일강수량 : 20㎜ 이상",
     "일최대순간풍속 : 15m/s 이상",
 ]
+from copy import copy
+def copy_block(ws, src_top, src_bottom, shift, c1, c2, header_rows=2):
+    """서식과 병합, 행 높이를 shift행 아래로 복사 (머리글 값만 복사)."""
+    for r in range(src_top, src_bottom + 1):
+        ws.row_dimensions[r + shift].height = ws.row_dimensions[r].height
+        for c in range(c1, c2 + 1):
+            src = ws.cell(r, c)
+            dst = ws.cell(r + shift, c)
+            dst._style = copy(src._style)
+            if r < src_top + header_rows:
+                dst.value = src.value
+    for m in list(ws.merged_cells.ranges):
+        if m.min_row >= src_top and m.max_row <= src_bottom and m.min_col >= c1 and m.max_col <= c2:
+            ws.merge_cells(start_row=m.min_row + shift, end_row=m.max_row + shift,
+                           start_column=m.min_col, end_column=m.max_col)
+
+copy_block(wx, 17, 29, 14, 1, 18)
+copy_block(wx, 17, 29, 28, 1, 18)
+for top in (31, 45):  # 새 블록의 '적용' 행 (원본 29행 형식)
+    a, b = top + 2, top + 11
+    wx.cell(b + 1, 3).value = "적  용"
+    for col in range(4, 16):
+        cl = openpyxl.utils.get_column_letter(col)
+        wx.cell(b + 1, col).value = f"=SUM({cl}{a}:{cl}{b})"
+    wx.cell(b + 1, 16).value = f"=SUM(D{b + 1}:O{b + 1})"
 wx["R3"] = "조건번호(자동)"
-for first, default in ((5, "서귀포"), (19, "제주")):
+BLOCKS = ((5, "제주"), (19, "서귀포"), (33, "고산"), (47, "성산"))
+for first, default in BLOCKS:
     last = first + 9
     code_cell = f"$A${first}"
     wx.cell(first, 2).value = default
@@ -71,16 +99,37 @@ for first, default in ((5, "서귀포"), (19, "제주")):
             wx.cell(r, 4 + m).value = (
                 f"=SUMIFS(기상자료!${col}$2:${col}${n},기상자료!$A$2:$A${n},{code_cell},기상자료!$D$2:$D${n},$R{r})")
         wx.cell(r, 16).value = f"=SUM(D{r}:O{r})"
-wx["A3"] = wx["A17"] = "지점코드"
-wx["B3"].value = wx["B17"].value = "지역 (선택)"
+for hr in (3, 17, 31, 45):
+    wx.cell(hr, 1).value = "지점코드"
+    wx.cell(hr, 2).value = "지역 (선택)"
 wx.column_dimensions["R"].width = 14
 
 # 3) 공기산정 시트 연결
 main = wb["공기산정"]
-main["Y19"], main["Z19"] = "='별표2-비작업일수'!A5", "='별표2-비작업일수'!B5"
-main["Y27"], main["Z27"] = "='별표2-비작업일수'!A19", "='별표2-비작업일수'!B19"
 main["AN21"] = "=SUM(AB21:AM21)"
-main["AA20"].value  # 표시용 셀 확인만
+X1, X2 = 24, 40  # X~AN
+copy_block(main, 25, 31, 16, X1, X2)   # 표3: 41~47행
+copy_block(main, 25, 31, 24, X1, X2)   # 표4: 49~55행
+WX = "'별표2-비작업일수'!"
+for top, r0 in ((17, 5), (25, 19), (41, 33), (49, 47)):
+    d0 = top + 2                        # 데이터 첫 행
+    main.cell(top, 27).value = "구분"    # AA
+    main.cell(d0, 25).value = f"={WX}A{r0}"    # 번호 -> 지점코드
+    main.cell(d0, 26).value = f"={WX}B{r0}"    # 지역
+    for k, (lab, off) in enumerate((("혹서기", 1), ("동절기", 3), ("강   우", 8), ("바람", 9))):
+        rr = d0 + k
+        main.cell(rr, 27).value = lab
+        for m in range(12):
+            main.cell(rr, 28 + m).value = f"={WX}{openpyxl.utils.get_column_letter(4 + m)}{r0 + off}"
+        main.cell(rr, 40).value = f"=SUM(AB{rr}:AM{rr})"
+    main.cell(d0 + 4, 27).value = "적  용"
+    for m in range(12):
+        cl = openpyxl.utils.get_column_letter(28 + m)
+        main.cell(d0 + 4, 28 + m).value = f"=SUM({cl}{d0}:{cl}{d0 + 3})"
+    main.cell(d0 + 4, 40).value = f"=SUM(AB{d0 + 4}:AM{d0 + 4})"
+# 왼쪽 월별표(F열)는 첫 번째 기상표(19~22행)의 해당 월 값을 참조 (원본은 다른 행을 가리켜 주석과 불일치)
+for r in range(19, 23):
+    main.cell(r, 6).value = f'=INDEX($AB{r}:$AM{r},VALUE(SUBSTITUTE(F$17,"월","")))'
 
 import sheets_civil
 n_hol = sheets_civil.add_holiday_sheet(wb)
