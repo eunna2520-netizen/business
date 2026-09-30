@@ -69,6 +69,12 @@ def add_workrate_sheet(wb):
         ws.append([key, unit, rate, src])
     for r in range(2, len(rows) + 2):
         ws.cell(r, 3).number_format = "#,##0.0000"
+    ws.cell(1, 5).value = "기본 기상세트"
+    _hdr(ws, 1, [5])
+    default_set = {"공통가설공사": "세트2", "토공사": "세트2", "배수공사": "세트1", "포장공사": "세트3",
+                   "교량공사": "세트1", "터널공사": "세트4", "부대공사": "세트2"}
+    for r, (key, *_r) in enumerate(rows, 2):
+        ws.cell(r, 5).value = default_set[key.split(">")[0]]
     ws.freeze_panes = "A2"
     ws.column_dimensions["A"].width = 70
     ws.column_dimensions["C"].width = 20
@@ -92,7 +98,7 @@ def add_workrate_sheet(wb):
     ws.cell(1, 10).value = "필터된 공종 목록 (자동, 공종 칸 드롭다운의 원본)"
     _hdr(ws, 1, [10])
     ws.column_dimensions["J"].width = 70
-    sel = "MATCH('공기산정(1일작업량)'!$B$26,$F$2:$F$%d,0)" % (ncat + 1)
+    sel = "MATCH('공기산정(1일작업량)'!$B$32,$F$2:$F$%d,0)" % (ncat + 1)
     for r in range(2, len(rows) + 2):
         k = f"ROWS($J$2:J{r})"
         ws.cell(r, 10).value = (f'=IF({k}<=INDEX($H$2:$H${ncat + 1},{sel}),'
@@ -191,21 +197,31 @@ def add_facility_sheet(wb):
     return ws
 
 
+SET_DEFAULTS = [
+    ("콘크리트·구조물", {1, 5, 6, 9, 13}),
+    ("토공·가설(옥외)", {1, 5, 6, 10, 13}),
+    ("포장(아스팔트)", {5, 6, 9}),
+    ("옥내·터널", {1, 5}),
+]
+
+
 def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
+    from openpyxl.utils import get_column_letter as L
+    import json as _json
     ws = wb.create_sheet("공기산정(1일작업량)")
     ws["A1"] = "1일 작업량에 의한 공사기간 산정 (가이드라인 제2장)"
     ws["A1"].font = Font(bold=True, size=14)
     ws["A2"] = ("공사기간 = 준비기간 + 주공정(CP) 공종별 공사기간의 합 + 정리기간,  공종별 공사기간 = 작업일수 + 비작업일수.  "
                 "월별 비작업일수 = A(기후)+B(공휴일)-C(A×B÷달력일수), 월 8일(주40시간) 미만이면 8일 적용.  "
-                "공종은 입력 순서대로 이어서 시공하는 것으로 계산합니다. 준비·정리기간에는 비작업일수를 넣지 않습니다.")
+                "공종마다 기상조건 세트를 골라 그 세트의 조건으로 비작업일수를 계산합니다. 공종은 입력 순서대로 이어서 시공하는 것으로 가정합니다. "
+                "준비·정리기간에는 비작업일수를 넣지 않습니다.")
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
     ws.merge_cells("A2:L2")
-    ws.row_dimensions[2].height = 48
+    ws.row_dimensions[2].height = 60
 
-    labels = [("A4", "기상 지점", "B4", "서울"), ("A5", "본공사 착수 연도", "B5", 2026),
-              ("A6", "본공사 착수 월", "B6", 7), ("A7", "준비기간 (일)", "B7", "='시설물별공기(토목)'!B14"),
-              ("A8", "정리기간 (일)", "B8", "='시설물별공기(토목)'!B15")]
-    for a, lab, b, val in labels:
+    for a, lab, b, val in [("A4", "기상 지점", "B4", "서울"), ("A5", "본공사 착수 연도", "B5", 2026),
+                           ("A6", "본공사 착수 월", "B6", 7), ("A7", "준비기간 (일)", "B7", "='시설물별공기(토목)'!B14"),
+                           ("A8", "정리기간 (일)", "B8", "='시설물별공기(토목)'!B15")]:
         ws[a], ws[b] = lab, val
         ws[a].font = BOLD
         ws[b].fill, ws[b].border = INPUT, BOX
@@ -216,101 +232,144 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     dvt = DataValidation(type="list", formula1=f"=공종프리셋!$A$1:${last_col}$1", allow_blank=False)
     ws.add_data_validation(dvt); dvt.add("B9")
     ws["C9"] = "※ 유형을 바꾸면 아래 공종표가 그 유형의 대표 공종으로 바뀝니다. 수량은 다시 입력하세요."
-    ws["C4"] = f'=IFERROR("지점코드 "&INDEX(지점목록!$C$2:$C${n_list},MATCH(B4,지점목록!$A$2:$A${n_list},0)),"지점명을 확인하세요")'
+    code = f"INDEX(지점목록!$C$2:$C${n_list},MATCH($B$4,지점목록!$A$2:$A${n_list},0))"
+    ws["C4"] = f'=IFERROR("지점코드 "&{code},"지점명을 확인하세요")'
     ws["C5"] = "※ 본공사 착수 월의 1일부터 계산 (준비기간은 그 이전)"
     dv = DataValidation(type="list", formula1=f"=지점목록!$A$2:$A${n_list}", allow_blank=False)
     ws.add_data_validation(dv); dv.add("B4")
 
-    # ── 기상조건 선택표 (행 12~24)
-    c0 = 11
-    ws.cell(c0 - 1, 1).value = "▼ 적용할 기상조건 선택 (O=적용, X=미적용) — 선택한 지점의 월별 비작업일수(2015~2024, 가이드라인 부록 3)"
-    ws.cell(c0 - 1, 1).font = BOLD
-    for j, h in enumerate(["번호", "기상조건", "적용", *[f"{m}월" for m in range(1, 13)], "소계"]):
+    # ── 기상조건 세트 (행 11~30)
+    ws["A11"] = "▼ 기상조건 세트 — 공종마다 다른 조건을 쓰도록 세트 4개를 정의합니다 (O=적용, X=미적용). 값은 선택한 지점의 월별 비작업일수(2015~2024, 부록 3)"
+    ws["A11"].font = BOLD
+    ws["A12"], ws["B12"] = "세트 이름 (수정 가능)", "※ 세트별 이름을 적어 두세요"
+    ws["A12"].font = BOLD
+    for p, (nm, _c) in enumerate(SET_DEFAULTS):
+        ws.cell(12, 3 + p).value = nm
+        ws.cell(12, 3 + p).fill, ws.cell(12, 3 + p).border = INPUT, BOX
+        ws.cell(12, 3 + p).alignment = Alignment(wrap_text=True, horizontal="center")
+    ws.row_dimensions[12].height = 32
+    c0 = 13
+    heads = ["번호", "기상조건", "세트1", "세트2", "세트3", "세트4", *[f"{m}월" for m in range(1, 13)], "소계"]
+    for j, h in enumerate(heads):
         ws.cell(c0, 1 + j).value = h
-    _hdr(ws, c0, range(1, 16))
+    _hdr(ws, c0, range(1, 20))
     dv2 = DataValidation(type="list", formula1='"O,X"', allow_blank=False)
     ws.add_data_validation(dv2)
-    names = json.load(open("data/weather.json", encoding="utf-8"))
+    names = _json.load(open("data/weather.json", encoding="utf-8"))
     for i, c in enumerate(names, 1):
         r = c0 + i
         ws.cell(r, 1).value, ws.cell(r, 2).value = i, c["name"]
-        ws.cell(r, 3).value = "O" if i in COND_DEFAULT_ON else "X"
-        ws.cell(r, 3).fill = INPUT
-        dv2.add(ws.cell(r, 3))
+        for p, (_nm, on) in enumerate(SET_DEFAULTS):
+            cell = ws.cell(r, 3 + p)
+            cell.value = "O" if i in on else "X"
+            cell.fill = INPUT
+            cell.alignment = Alignment(horizontal="center")
+            dv2.add(cell)
         for m in range(12):
             col = "FGHIJKLMNOPQ"[m]
-            ws.cell(r, 4 + m).value = (f"=SUMIFS(기상자료!${col}$2:${col}${n_data},기상자료!$A$2:$A${n_data},"
-                                       f"INDEX(지점목록!$C$2:$C${n_list},MATCH($B$4,지점목록!$A$2:$A${n_list},0)),"
+            ws.cell(r, 7 + m).value = (f"=SUMIFS(기상자료!${col}$2:${col}${n_data},기상자료!$A$2:$A${n_data},{code},"
                                        f"기상자료!$D$2:$D${n_data},$A{r})")
-        ws.cell(r, 16).value = f"=SUM(D{r}:O{r})"
-        for cc in range(1, 17):
+        ws.cell(r, 19).value = f"=SUM(G{r}:R{r})"
+        for cc in range(1, 20):
             ws.cell(r, cc).border = BOX
-    sr = c0 + len(names) + 1
-    ws.cell(sr, 2).value = "적용 조건 합계 (A: 기후여건)"
-    ws.cell(sr, 2).font = BOLD
-    for m in range(12):
-        col = ws.cell(sr, 4 + m).column_letter
-        ws.cell(sr, 4 + m).value = f'=SUMPRODUCT(($C${c0 + 1}:$C${c0 + 13}="O")*{col}{c0 + 1}:{col}{c0 + 13})'
-        ws.cell(sr, 4 + m).fill = RESULT
-    ws.cell(sr, 16).value = f"=SUM(D{sr}:O{sr})"
-    A_ROW = sr
+    f1, f2 = c0 + 1, c0 + 13
+    sum_row = {}
+    for p in range(4):
+        r = f2 + 1 + p
+        sum_row[p] = r
+        ws.cell(r, 2).value = f"세트{p + 1} 기후여건 A 합계"
+        ws.cell(r, 2).font = BOLD
+        fl = "CDEF"[p]
+        for m in range(12):
+            cl = L(7 + m)
+            ws.cell(r, 7 + m).value = f'=SUMPRODUCT(({fl}${f1}:{fl}${f2}="O")*{cl}${f1}:{cl}${f2})'
+            ws.cell(r, 7 + m).fill = RESULT
+        ws.cell(r, 19).value = f"=SUM(G{r}:R{r})"
+    last_sum = f2 + 4
 
-    # ── 월별 표 (60개월)
-    mt = sr + 12 + 20  # 월별 표 헤더 행 (공종표 뒤)
-    first, last = mt + 1, mt + 60
+    fr = last_sum + 2  # 분류 필터 행
+    ws.cell(fr, 1).value, ws.cell(fr, 2).value = "공종 목록 분류 (선택 범위 좁히기)", "전체"
+    ws.cell(fr, 1).font = BOLD
+    ws.cell(fr, 2).fill, ws.cell(fr, 2).border = INPUT, BOX
+    dvc = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$F$2:$F${n_cat + 1}", allow_blank=False)
+    ws.add_data_validation(dvc); dvc.add(f"B{fr}")
+    ws.cell(fr, 3).value = "※ 분류를 고르면 아래 공종 칸의 목록이 그 분류의 공종만 보입니다."
+    # 필터된 목록의 기준 셀은 add_workrate_sheet에서 B{fr}을 참조하도록 고정: 여기서는 위치 검증만 한다
+    assert fr == 32, fr
 
-    # ── 공종 입력표
-    wt = sr + 3
+    wt = fr + 2
     ws.cell(wt - 1, 1).value = "▼ 공종별 작업량 입력 (주공정=Y인 공종만 공사기간에 합산, 위에서 아래 순서로 이어서 시공)"
     ws.cell(wt - 1, 1).font = BOLD
-    heads = ["공종 (목록 선택 또는 직접 입력)", "작업수량", "단위", "1일 작업량 (수정 가능)", "주공정(Y/N)", "작업일수", "누적 작업일수", "경과일수(누적)", "공종별 공사기간", "비작업일수", "부록4 원문 표기"]
+    ws.cell(wt - 1, 6).value = "※ 공종 삭제=칸 지우기, 추가=빈 줄에서 목록 선택. 1일 작업량·기상세트는 덮어써서 수정 가능."
+    heads = ["공종 (목록 선택 또는 직접 입력)", "작업수량", "단위", "1일 작업량 (수정 가능)", "주공정(Y/N)", "기상조건 세트",
+             "작업일수", "시작(경과일)", "종료(경과일)", "공종별 공사기간", "비작업일수", "부록4 원문 표기",
+             "세트번호", "시작월 순번", "시작시 누적작업가능", "종료월 순번"]
     for j, h in enumerate(heads):
         ws.cell(wt, 1 + j).value = h
-    _hdr(ws, wt, range(1, 12))
+    _hdr(ws, wt, range(1, 17))
+    for c in range(13, 17):
+        ws.cell(wt, c).fill = PatternFill("solid", fgColor="EDEDED")
     dv3 = DataValidation(type="list", formula1='"Y,N"', allow_blank=False)
     ws.add_data_validation(dv3)
-    K, L, D_, J_ = (f"$K${first}:$K${last}", f"$L${first}:$L${last}", f"$D${first}:$D${last}", f"$J${first}:$J${last}")
-    n_rows = 15
-    ws.cell(wt - 1, 6).value = "※ 공종 삭제=칸 지우기, 추가=빈 줄에서 목록 선택. 1일 작업량은 덮어써서 수정 가능."
-    ws["A26"], ws["B26"] = "공종 목록 분류 (선택 범위 좁히기)", "전체"
-    ws["A26"].font = BOLD
-    ws["B26"].fill, ws["B26"].border = INPUT, BOX
-    dvc = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$F$2:$F${n_cat + 1}", allow_blank=False)
-    ws.add_data_validation(dvc); dvc.add("B26")
-    ws["C26"] = "※ 분류를 고르면 아래 공종 칸의 목록이 그 분류의 공종만 보입니다."
+    dvs = DataValidation(type="list", formula1=f"=$C${c0}:$F${c0}", allow_blank=True)
+    ws.add_data_validation(dvs)
     dv4 = DataValidation(type="list", formula1=f"='1일작업량(토목)'!$J$2:$J${n_rate}", allow_blank=True)
     dv4.showErrorMessage = False
     ws.add_data_validation(dv4)
+
+    n_rows = 15
+    t1, t2 = wt + 1, wt + n_rows
+    res = t2 + 2
+    mt = res + 11
+    first, last = mt + 1, mt + 60
+    # 월별 표 참조 범위
+    rng = lambda col: f"${L(col)}${first}:${L(col)}${last}"
+    FC = rng(6)          # 누적 달력일수(전월까지)
+    CAL = rng(4)         # 달력일수
+    Kc = [rng(7 + 5 * p + 4) for p in range(4)]   # 누적 작업가능(전월까지)
+    Vc = [rng(7 + 5 * p + 3) for p in range(4)]   # 작업가능일수
+    choose = lambda lst: "CHOOSE(M{r}," + ",".join(lst) + ")"
+    wk = "'1일작업량(토목)'"
     for i in range(n_rows):
-        r = wt + 1 + i
+        r = t1 + i
+        ch = lambda lst: "CHOOSE($M%d,%s)" % (r, ",".join(lst))
         ws.cell(r, 1).value = (f"=IFERROR(INDEX(공종프리셋!$A$2:${last_col}$16,{i + 1},"
                                f"MATCH($B$9,공종프리셋!$A$1:${last_col}$1,0))&\"\",\"\")")
         dv4.add(ws.cell(r, 1))
-        m = f"MATCH($A{r},'1일작업량(토목)'!$A$2:$A${n_rate},0)"
-        ws.cell(r, 3).value = f"=IFERROR(INDEX('1일작업량(토목)'!$B$2:$B${n_rate},{m}),\"\")"
-        ws.cell(r, 4).value = f"=IFERROR(INDEX('1일작업량(토목)'!$C$2:$C${n_rate},{m}),\"\")"
+        m = f"MATCH($A{r},{wk}!$A$2:$A${n_rate},0)"
+        ws.cell(r, 3).value = f"=IFERROR(INDEX({wk}!$B$2:$B${n_rate},{m}),\"\")"
+        ws.cell(r, 4).value = f"=IFERROR(INDEX({wk}!$C$2:$C${n_rate},{m}),\"\")"
         ws.cell(r, 5).value = f'=IF(A{r}="","","Y")'
         dv3.add(ws.cell(r, 5))
-        for c in (1, 2, 3, 4, 5):
+        ws.cell(r, 6).value = (f'=IF(A{r}="","",IFERROR(INDEX({wk}!$E$2:$E${n_rate},{m}),'
+                               f'IF(ISNUMBER(SEARCH("포장",A{r})),"세트3","세트1")))')
+        dvs.add(ws.cell(r, 6))
+        for c in (1, 2, 3, 4, 5, 6):
             ws.cell(r, c).fill = INPUT
-        ws.cell(r, 6).value = f'=IF(AND(ISNUMBER(B{r}),ISNUMBER(D{r}),N(D{r})>0),ROUNDUP(ROUND(B{r}/D{r},6),0),"")'
-        ws.cell(r, 7).value = f'=IF(F{r}="","",N(G{r - 1})+IF(E{r}="Y",F{r},0))'
-        ws.cell(r, 8).value = (
-            f'=IF(G{r}="","",IF(G{r}=0,0,IF(G{r}>INDEX({K},60)+INDEX({J_},60),"기간초과",'
-            f'INDEX({L},MATCH(G{r},{K},1))+(G{r}-INDEX({K},MATCH(G{r},{K},1)))'
-            f'*INDEX({D_},MATCH(G{r},{K},1))/INDEX({J_},MATCH(G{r},{K},1)))))')
-        ws.cell(r, 9).value = f'=IF(F{r}="","",IF(E{r}="Y",IF(ISNUMBER(H{r}),ROUND(H{r}-N(H{r - 1}),1),"기간초과"),"-"))'
-        ws.cell(r, 10).value = f'=IF(ISNUMBER(I{r}),ROUND(I{r}-F{r},1),"")'
-        ws.cell(r, 11).value = f"=IFERROR(INDEX('1일작업량(토목)'!$D$2:$D${n_rate},{m}),\"\")"
-        for c in range(1, 12):
+        ws.cell(r, 7).value = f'=IF(AND(ISNUMBER(B{r}),ISNUMBER(D{r}),N(D{r})>0),ROUNDUP(ROUND(B{r}/D{r},6),0),"")'
+        ws.cell(r, 13).value = f'=IF(G{r}="","",IFERROR(MATCH(F{r},$C${c0}:$F${c0},0),1))'
+        ws.cell(r, 8).value = f'=IF(G{r}="","",0)' if i == 0 else f'=IF(G{r}="","",MAX(0,MAX(I${t1}:I{r - 1})))'
+        ws.cell(r, 14).value = f'=IF(G{r}="","",MATCH(H{r},{FC},1))'
+        ws.cell(r, 15).value = (f'=IF(G{r}="","",INDEX({ch(Kc)},N{r})+(H{r}-INDEX({FC},N{r}))'
+                                f'*INDEX({ch(Vc)},N{r})/INDEX({CAL},N{r}))')
+        ws.cell(r, 16).value = (f'=IF(G{r}="","",IF(O{r}+G{r}>INDEX({ch(Kc)},60)+INDEX({ch(Vc)},60),"기간초과",'
+                                f'MATCH(O{r}+G{r},{ch(Kc)},1)))')
+        ws.cell(r, 9).value = (f'=IF(G{r}="","",IF(E{r}<>"Y",H{r},IF(P{r}="기간초과","기간초과",'
+                               f'INDEX({FC},P{r})+(O{r}+G{r}-INDEX({ch(Kc)},P{r}))*INDEX({CAL},P{r})/INDEX({ch(Vc)},P{r}))))')
+        ws.cell(r, 10).value = f'=IF(G{r}="","",IF(E{r}="Y",IF(ISNUMBER(I{r}),ROUND(I{r}-H{r},1),"기간초과"),"-"))'
+        ws.cell(r, 11).value = f'=IF(ISNUMBER(J{r}),ROUND(J{r}-G{r},1),"")'
+        ws.cell(r, 12).value = f"=IFERROR(INDEX({wk}!$D$2:$D${n_rate},{m}),\"\")"
+        for c in range(1, 17):
             ws.cell(r, c).border = BOX
-    t1, t2 = wt + 1, wt + n_rows
-    res = t2 + 2
+        for c in range(13, 17):
+            ws.cell(r, c).font = Font(color="808080")
+
     ws.cell(res, 1).value = "▼ 결과"
     ws.cell(res, 1).font = BOLD
     out = [
         ("준비기간 (일)", "=B7"),
-        ("주공정 공종별 공사기간의 합 (일)", f'=IFERROR(ROUNDUP(MAX(H{t1}:H{t2}),0),"기간초과")'),
+        ("주공정 공종별 공사기간의 합 (일)",
+         f'=IF(COUNTIF(I{t1}:I{t2},"기간초과")>0,"기간초과",ROUNDUP(MAX(0,MAX(I{t1}:I{t2})),0))'),
         ("정리기간 (일)", "=B8"),
     ]
     for i, (lab, f) in enumerate(out):
@@ -328,17 +387,20 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     for r in range(res + 1, res + 8):
         ws.cell(r, 1).font = BOLD
         ws.cell(r, 2).fill, ws.cell(r, 2).border = RESULT, BOX
-    assert res + 8 < mt, (res, mt)
+    assert res + 8 < mt - 1, (res, mt)
 
-    # ── 월별 비작업일수 표
-    ws.cell(mt - 1, 1).value = "▼ 월별 비작업일수 계산 (착수 월부터 60개월)"
+    # ── 월별 비작업일수 표 (공통 + 세트 4개)
+    ws.cell(mt - 1, 1).value = "▼ 월별 비작업일수 계산 (착수 월부터 60개월) — 세트별로 기후여건 A가 다릅니다"
     ws.cell(mt - 1, 1).font = BOLD
-    heads = ["순번", "연도", "월", "달력일수", "법정공휴일 B", "기후여건 A", "중복일수 C=A×B÷달력일수",
-             "A+B-C", "적용 비작업일수(월8일 이상, 정수)", "작업가능일수", "누적 작업가능(전월까지)", "누적 달력일수(전월까지)"]
-    for j, h in enumerate(heads):
+    base_heads = ["순번", "연도", "월", "달력일수", "법정공휴일 B", "누적 달력일수(전월까지)"]
+    blk = ["기후여건 A", "중복일수 C", "적용 비작업일수(월8일 이상, 정수)", "작업가능일수", "누적 작업가능(전월까지)"]
+    for j, h in enumerate(base_heads):
         ws.cell(mt, 1 + j).value = h
-    _hdr(ws, mt, range(1, 13))
-    ws.row_dimensions[mt].height = 48
+    for p in range(4):
+        for j, h in enumerate(blk):
+            ws.cell(mt, 7 + 5 * p + j).value = f"세트{p + 1} {h}"
+    _hdr(ws, mt, range(1, 27))
+    ws.row_dimensions[mt].height = 62
     for i in range(60):
         r = first + i
         ws.cell(r, 1).value = i + 1
@@ -346,20 +408,64 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
         ws.cell(r, 3).value = f"=MONTH(EDATE(DATE($B$5,$B$6,1),A{r}-1))"
         ws.cell(r, 4).value = f"=DAY(EOMONTH(DATE(B{r},C{r},1),0))"
         ws.cell(r, 5).value = f"=IFERROR(INDEX(법정공휴일!$B$4:$M${n_hol},MATCH(B{r},법정공휴일!$A$4:$A${n_hol},0),C{r}),0)"
-        ws.cell(r, 6).value = f"=INDEX($D${A_ROW}:$O${A_ROW},C{r})"
-        ws.cell(r, 7).value = f"=ROUND(F{r}*E{r}/D{r},1)"
-        ws.cell(r, 8).value = f"=F{r}+E{r}-G{r}"
-        ws.cell(r, 9).value = f"=ROUND(MAX(H{r},8),0)"
-        ws.cell(r, 10).value = f"=D{r}-I{r}"
-        ws.cell(r, 11).value = 0 if i == 0 else f"=K{r - 1}+J{r - 1}"
-        ws.cell(r, 12).value = 0 if i == 0 else f"=L{r - 1}+D{r - 1}"
-        for c in range(1, 13):
+        ws.cell(r, 6).value = 0 if i == 0 else f"=F{r - 1}+D{r - 1}"
+        for p in range(4):
+            b = 7 + 5 * p
+            a_, c_, adj, av, k = (L(b + j) for j in range(5))
+            ws.cell(r, b).value = f"=INDEX($G${sum_row[p]}:$R${sum_row[p]},C{r})"
+            ws.cell(r, b + 1).value = f"=ROUND({a_}{r}*E{r}/D{r},1)"
+            ws.cell(r, b + 2).value = f"=ROUND(MAX({a_}{r}+E{r}-{c_}{r},8),0)"
+            ws.cell(r, b + 3).value = f"=D{r}-{adj}{r}"
+            ws.cell(r, b + 4).value = 0 if i == 0 else f"={k}{r - 1}+{av}{r - 1}"
+        for c in range(1, 27):
             ws.cell(r, c).border = BOX
-    ws.cell(last + 2, 1).value = ("※ 마지막 달은 '비작업일수 = 총 비작업일수 × 잔여작업일수 ÷ 그 달 총 작업가능일수' 규칙(가이드라인 1150행)으로 안분합니다. "
-                                  "가이드라인 예시(철골세우기)는 20+23+12+10+10을 74일로 적었으나 실제 합은 75일입니다.")
+    ws.cell(last + 2, 1).value = ("※ 각 공종은 앞 공종이 끝난 시점에서 시작하며, 그 공종의 기상세트 표로 작업가능일수를 채워 종료 시점을 찾습니다. "
+                                  "한 달 안에서는 작업가능일수가 고르게 분포한다고 보고 안분합니다(가이드라인 1150행 규칙과 같은 방식).")
     ws.column_dimensions["A"].width = 60
-    ws.column_dimensions["B"].width = 20
-    for col in "CDEFGHIJKL":
-        ws.column_dimensions[col].width = 14
-    ws.column_dimensions["K"].width = 18
+    ws.column_dimensions["B"].width = 22
+    for col in range(3, 27):
+        ws.column_dimensions[L(col)].width = 13
+    ws.column_dimensions["L"].width = 18
+    return ws
+
+
+LIMIT_ROWS = [
+    ("연약지반 고결공", "동절기 4℃ 이하, 바람 15km/h 이상", "KCS 11 30 30", "가까운 조건 없음 (직접 검토)"),
+    ("비탈면 녹화", "10℃ 이하, 혹서기 25℃ 이상", "KCS 11 73 15", "가까운 조건 없음 (직접 검토)"),
+    ("보강토 옹벽 뒷채움·블록 속채움", "1.5℃ 미만, 강우 시, 강설 시", "KCS 11 80 10", "5(최고 0℃↓), 9~12(강우), 6(신적설)"),
+    ("굴착 및 복구공사 다짐", "0℃ 이하, 강우 시", "SMCS 11 85 10", "5(최고 0℃↓), 9(강우 3mm)"),
+    ("일반 콘크리트 타설", "강우·강설 시 원칙적으로 타설 금지", "KCS 14 20 10", "9(강우 3mm), 6(신적설)"),
+    ("한중 콘크리트", "일평균 기온 -3℃ 이하", "EXCS 14 20 40", "5(최고 0℃↓)로 근사"),
+    ("숏 콘크리트", "혹서기 32℃ 이상", "KCS 14 20 51", "3(일최고 33℃)으로 근사"),
+    ("프리캐스트 콘크리트", "-5℃ 이하, 풍속 10 m/s 이상", "SMCS 14 20 52", "5(최고 0℃↓), 13(순간풍속 15m/s)으로 근사"),
+    ("이동식 크레인", "평균풍속 10 m/s", "KCS 21 20 10", "13(순간풍속 15m/s)으로 근사, 타워크레인은 본문 758행 참고"),
+    ("강구조 도장", "5℃ 미만, 강우 시, 강풍, 강설 시, 43℃ 이상", "KCS 14 31 40", "9(강우), 6(신적설), 13(바람)"),
+]
+
+
+def add_limit_reference_sheet(wb):
+    ws = wb.create_sheet("작업제한기상조건(참고)")
+    ws["A1"] = "작업제한 기상조건 참고표 (가이드라인 부록 2에서 발췌) — 기상조건 세트를 정할 때 참고하세요"
+    ws["A1"].font = Font(bold=True, size=13)
+    ws["A2"] = ("부록 2의 기준값은 작업마다 다르고(4℃, 5℃, 10 m/s 등) 부록 3에서 미리 계산된 13개 조건과 딱 맞지 않는 경우가 많습니다. "
+                "정확히 맞는 조건이 없으면 가장 가까운 조건을 고르고, 산정 근거에 그렇게 판단한 이유를 적으세요. 아래는 일부 발췌이며 전체는 부록 2(원문 1355~1937행)를 확인하세요.")
+    ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A2:D2")
+    ws.row_dimensions[2].height = 62
+    for j, h in enumerate(["작업", "작업제한 기상조건 (부록 2)", "출처", "공기산정 시트에서 고를 조건 번호"]):
+        ws.cell(4, 1 + j).value = h
+    _hdr(ws, 4, range(1, 5))
+    for i, row in enumerate(LIMIT_ROWS):
+        for j, v in enumerate(row):
+            ws.cell(5 + i, 1 + j).value = v
+            ws.cell(5 + i, 1 + j).border = BOX
+            ws.cell(5 + i, 1 + j).alignment = Alignment(wrap_text=True, vertical="top")
+    r0 = 6 + len(LIMIT_ROWS)
+    ws.cell(r0, 1).value = "▼ 공사기간 산정 시트의 조건 번호"
+    ws.cell(r0, 1).font = BOLD
+    names = json.load(open("data/weather.json", encoding="utf-8"))
+    for i, c in enumerate(names, 1):
+        ws.cell(r0 + i, 1).value, ws.cell(r0 + i, 2).value = i, c["name"]
+    for col, w in zip("ABCD", (34, 44, 18, 46)):
+        ws.column_dimensions[col].width = w
     return ws
