@@ -127,6 +127,13 @@ for top, r0 in ((17, 5), (25, 19), (41, 33), (49, 47)):
         cl = openpyxl.utils.get_column_letter(28 + m)
         main.cell(d0 + 4, 28 + m).value = f"=SUM({cl}{d0}:{cl}{d0 + 3})"
     main.cell(d0 + 4, 40).value = f"=SUM(AB{d0 + 4}:AM{d0 + 4})"
+# 준비기간 예시를 2026 가이드라인 표로 갱신 (6행으로 늘림)
+import sheets_civil as _sc
+copy_block(main, 13, 13, 1, 4, 12, header_rows=0)
+for i, (a1, a2, b1, b2) in enumerate(_sc.PREP_EXAMPLES):
+    r = 9 + i
+    main.cell(r, 4).value, main.cell(r, 7).value = a1, a2
+    main.cell(r, 9).value, main.cell(r, 11).value = b1, b2
 # 왼쪽 월별표(F열)는 첫 번째 기상표(19~22행)의 해당 월 값을 참조 (원본은 다른 행을 가리켜 주석과 불일치)
 for r in range(19, 23):
     main.cell(r, 6).value = f'=INDEX($AB{r}:$AM{r},VALUE(SUBSTITUTE(F$17,"월","")))'
@@ -136,7 +143,8 @@ n_hol = sheets_civil.add_holiday_sheet(wb)
 n_rate, n_cat = sheets_civil.add_workrate_sheet(wb)
 n_types = sheets_civil.add_preset_sheet(wb)
 sheets_civil.add_facility_sheet(wb)
-sheets_civil.add_workday_sheet(wb, n, np_, n_hol, n_rate, n_types, n_cat)
+_ws, info = sheets_civil.add_workday_sheet(wb, n, np_, n_hol, n_rate, n_types, n_cat)
+sheets_civil.add_schedule_sheet(wb, info, n_hol)
 sheets_civil.add_limit_reference_sheet(wb)
 wb.calculation.fullCalcOnLoad = True
 wb.save("공기산정_2026기준.xlsx")
