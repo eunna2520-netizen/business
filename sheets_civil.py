@@ -234,13 +234,13 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     ws["A2"] = ("공사기간 = 준비기간 + 주공정(CP) 공종별 공사기간의 합 + 정리기간,  공종별 공사기간 = 작업일수 + 비작업일수.  "
                 "월별 비작업일수 = A(기후)+B(공휴일)-C(A×B÷달력일수), 월 8일(주40시간) 미만이면 8일 적용.  "
                 "공종마다 기상조건 세트를 골라 그 세트의 조건으로 비작업일수를 계산합니다. 공종은 입력 순서대로 이어서 시공하는 것으로 가정합니다. "
-                "준비·정리기간에는 비작업일수를 넣지 않습니다.")
+                "착공일(착공 월 1일)부터 준비기간이 지난 날부터 본공사로 봅니다. 준비·정리기간에는 비작업일수를 넣지 않습니다.")
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
     ws.merge_cells("A2:L2")
     ws.row_dimensions[2].height = 60
 
-    for a, lab, b, val in [("A4", "기상 지점", "B4", "제주"), ("A5", "본공사 착수 연도", "B5", 2026),
-                           ("A6", "본공사 착수 월", "B6", 7), ("A7", "준비기간 (일)", "B7", "='시설물별공기(토목)'!B14"),
+    for a, lab, b, val in [("A4", "기상 지점", "B4", "제주"), ("A5", "착공 연도", "B5", 2026),
+                           ("A6", "착공 월 (착공일=1일)", "B6", 7), ("A7", "준비기간 (일)", "B7", "='시설물별공기(토목)'!B14"),
                            ("A8", "정리기간 (일)", "B8", "='시설물별공기(토목)'!B15")]:
         ws[a], ws[b] = lab, val
         ws[a].font = BOLD
@@ -252,9 +252,13 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     dvt = DataValidation(type="list", formula1=f"=공종프리셋!$A$1:${last_col}$1", allow_blank=False)
     ws.add_data_validation(dvt); dvt.add("B9")
     ws["C9"] = "※ 유형을 바꾸면 아래 공종표가 그 유형의 대표 공종으로 바뀝니다. 수량은 다시 입력하세요."
+    ws["A10"], ws["B10"] = "본공사 시작일 (착공일+준비기간)", "=DATE(B5,B6,1)+B7"
+    ws["A10"].font = BOLD
+    ws["B10"].fill, ws["B10"].border = RESULT, BOX
+    ws["B10"].number_format = "yyyy-mm-dd"
     code = f"INDEX(지점목록!$C$2:$C${n_list},MATCH($B$4,지점목록!$A$2:$A${n_list},0))"
     ws["C4"] = f'=IFERROR("지점코드 "&{code},"지점명을 확인하세요")'
-    ws["C5"] = "※ 본공사 착수 월의 1일부터 계산 (준비기간은 그 이전)"
+    ws["C5"] = "※ 착공일 = 착공 월 1일. 준비기간이 지난 날부터 본공사(비작업일수 반영)로 계산합니다."
     dv = DataValidation(type="list", formula1=f"=지점목록!$A$2:$A${n_list}", allow_blank=False)
     ws.add_data_validation(dv); dv.add("B4")
 
@@ -404,15 +408,19 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     ws.cell(res + 7, 2).value = (f'=IF(AND(ISNUMBER(B{res + 4}),ISNUMBER(B{res + 6})),'
                                  f'IF(ABS(B{res + 4}/B{res + 6}-1)<=0.2,"±20% 이내 (적정)","±20% 초과 → 산정 과정 재검토 (편차 "&TEXT(B{res + 4}/B{res + 6}-1,"0.0%")&")"),'
                                  f'"산정공식 적용범위 밖이거나 미입력 → 비교 생략")')
-    for r in range(res + 1, res + 8):
+    ws.cell(res + 8, 1).value, ws.cell(res + 8, 2).value = "착공일 (착공 월 1일)", "=DATE(B5,B6,1)"
+    ws.cell(res + 9, 1).value = "종료 예정일 (착공일 + 준비 + 본공사 + 정리 - 1일)"
+    ws.cell(res + 9, 2).value = f'=IF(ISNUMBER(B{res + 4}),DATE(B5,B6,1)+B{res + 4}-1,"-")'
+    for r in range(res + 1, res + 10):
         ws.cell(r, 1).font = BOLD
         ws.cell(r, 2).fill, ws.cell(r, 2).border = RESULT, BOX
-    assert res + 8 < mt - 1, (res, mt)
+    ws.cell(res + 8, 2).number_format = ws.cell(res + 9, 2).number_format = "yyyy-mm-dd"
+    assert res + 9 < mt - 1, (res, mt)
 
     # ── 월별 비작업일수 표 (공통 + 세트 4개)
     ws.cell(mt - 1, 1).value = "▼ 월별 비작업일수 계산 (착수 월부터 60개월) — 세트별로 기후여건 A가 다릅니다"
     ws.cell(mt - 1, 1).font = BOLD
-    base_heads = ["순번", "연도", "월", "달력일수", "법정공휴일 B", "누적 달력일수(전월까지)"]
+    base_heads = ["순번", "연도", "월", "달력일수 (첫 달은 본공사 시작일부터)", "법정공휴일 B", "누적 달력일수(전월까지)"]
     blk = ["기후여건 A", "중복일수 C", "적용 비작업일수(월8일 이상, 정수)", "작업가능일수", "누적 작업가능(전월까지)"]
     for j, h in enumerate(base_heads):
         ws.cell(mt, 1 + j).value = h
@@ -424,18 +432,19 @@ def add_workday_sheet(wb, n_data, n_list, n_hol, n_rate, n_types, n_cat):
     for i in range(60):
         r = first + i
         ws.cell(r, 1).value = i + 1
-        ws.cell(r, 2).value = f"=YEAR(EDATE(DATE($B$5,$B$6,1),A{r}-1))"
-        ws.cell(r, 3).value = f"=MONTH(EDATE(DATE($B$5,$B$6,1),A{r}-1))"
-        ws.cell(r, 4).value = f"=DAY(EOMONTH(DATE(B{r},C{r},1),0))"
+        full = f"DAY(EOMONTH(DATE(B{r},C{r},1),0))"
+        ws.cell(r, 2).value = f"=YEAR(EDATE(DATE(YEAR($B$10),MONTH($B$10),1),A{r}-1))"
+        ws.cell(r, 3).value = f"=MONTH(EDATE(DATE(YEAR($B$10),MONTH($B$10),1),A{r}-1))"
+        ws.cell(r, 4).value = "=DAY(EOMONTH($B$10,0))-DAY($B$10)+1" if i == 0 else f"={full}"
         ws.cell(r, 5).value = f"=IFERROR(INDEX(법정공휴일!$B$4:$M${n_hol},MATCH(B{r},법정공휴일!$A$4:$A${n_hol},0),C{r}),0)"
         ws.cell(r, 6).value = 0 if i == 0 else f"=F{r - 1}+D{r - 1}"
         for p in range(4):
             b = 7 + 5 * p
             a_, c_, adj, av, k = (L(b + j) for j in range(5))
             ws.cell(r, b).value = f"=INDEX($G${sum_row[p]}:$R${sum_row[p]},C{r})"
-            ws.cell(r, b + 1).value = f"=ROUND({a_}{r}*E{r}/D{r},1)"
+            ws.cell(r, b + 1).value = f"=ROUND({a_}{r}*E{r}/{full},1)"
             ws.cell(r, b + 2).value = f"=ROUND(MAX({a_}{r}+E{r}-{c_}{r},8),0)"
-            ws.cell(r, b + 3).value = f"=D{r}-{adj}{r}"
+            ws.cell(r, b + 3).value = f"=D{r}*({full}-{adj}{r})/{full}"
             ws.cell(r, b + 4).value = 0 if i == 0 else f"={k}{r - 1}+{av}{r - 1}"
         for c in range(1, 27):
             ws.cell(r, c).border = BOX
@@ -551,14 +560,15 @@ def add_schedule_sheet(wb, info, n_hol):
     from openpyxl.utils import get_column_letter as L
     WD = "'공기산정(1일작업량)'!"
     ws = wb.create_sheet("월별산정표(자동)")
-    ws["A1"] = "월별 산정표 — 착공 월과 작업일수를 넣으면 착공부터 종료까지 월별 표가 자동으로 만들어집니다"
+    ws["A1"] = "월별 산정표 — 착공 월과 작업일수를 넣으면 착공부터 종료 예정일까지 자동으로 계산됩니다"
     ws["A1"].font = Font(bold=True, size=14)
-    ws["A2"] = ("가이드라인 '공종별 공사기간 산정 예시(철골세우기)'와 같은 방식입니다. 월별 비작업일수 = A+B-C(월 8일 이상), 작업가능일수 = 달력일수-비작업일수, "
-                "마지막 달은 '비작업일수 × 잔여작업일수 ÷ 그 달 작업가능일수'로 안분합니다. 지점은 '공기산정(1일작업량)' 시트의 기상 지점(B4)을 따릅니다.")
+    ws["A2"] = ("착공일(착공 월 1일)에서 준비기간이 지난 날부터 본공사로 보고, 본공사 구간의 월별 비작업일수를 반영합니다. "
+                "월별 비작업일수 = A+B-C(월 8일 이상), 작업가능일수 = 달력일수-비작업일수, 마지막 달은 '비작업일수 × 잔여작업일수 ÷ 그 달 작업가능일수'로 안분합니다. "
+                "종료 예정일 = 착공일 + 준비기간 + 본공사 기간 + 정리기간 - 1일. 지점·준비기간·정리기간은 '공기산정(1일작업량)' 시트의 값을 따릅니다.")
     ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
     ws.merge_cells("A2:N2")
-    ws.row_dimensions[2].height = 48
-    rows = [("착공 연도", f"={WD}B5"), ("착공 월", f"={WD}B6"), ("기상 지점", f"={WD}B4"),
+    ws.row_dimensions[2].height = 60
+    rows = [("착공 연도", f"={WD}B5"), ("착공 월 (착공일=1일)", f"={WD}B6"), ("기상 지점", f"={WD}B4"),
             ("기상조건 세트", "세트1"), ("작업일수 (직접 입력)", None)]
     for i, (lab, val) in enumerate(rows):
         r = 4 + i
@@ -579,38 +589,42 @@ def add_schedule_sheet(wb, info, n_hol):
     ws["D7"].font = Font(color="808080")
 
     first, last = 32, 91
-    T = lambda col: f"${col}${first}:${col}${last}"
     ws["A11"] = "▼ 요약"
     ws["A11"].font = BOLD
     summary = [
-        ("착공", f'=B4&"년 "&B5&"월"'),
-        ("종료 예정", f'=IF(COUNT(A{first}:A{last})=0,"-",INDEX(B{first}:B{last},COUNT(A{first}:A{last})))'),
-        ("소요 개월 수 (달력 기준)", f"=COUNT(A{first}:A{last})"),
+        ("착공일", "=DATE(B4,B5,1)"),
+        ("준비기간 (일)", f"={WD}B7"),
+        ("본공사 시작일 (착공일+준비기간)", "=B12+B13"),
+        ("본공사 기간 (작업+비작업, 일)", f"=ROUNDUP(SUM(M{first}:M{last}),0)"),
+        ("본공사 종료일", '=IF(ISNUMBER(B15),B14+B15-1,"-")'),
+        ("정리기간 (일)", f"={WD}B8"),
+        ("종료 예정일", '=IF(ISNUMBER(B15),B16+B17,"-")'),
+        ("총 공사기간 (일, 준비+본공사+정리)", "=B13+B15+B17"),
+        ("환산 (개월)", "=ROUND(B19/30,1)"),
         ("작업일수 합계", f"=SUM(K{first}:K{last})"),
         ("비작업일수 합계", f"=ROUND(SUM(L{first}:L{last}),1)"),
-        ("산정 기간 (작업+비작업, 일)", f"=ROUNDUP(SUM(M{first}:M{last}),0)"),
-        ("준비기간 (일)", f"={WD}B7"),
-        ("정리기간 (일)", f"={WD}B8"),
-        ("총 공사기간 (일)", "=B17+B18+B19"),
-        ("환산 (개월)", "=ROUND(B20/30,1)"),
+        ("본공사 구간 달력 월 수", f"=COUNT(A{first}:A{last})"),
     ]
     for i, (lab, f) in enumerate(summary):
         r = 12 + i
         ws.cell(r, 1).value, ws.cell(r, 2).value = lab, f
         ws.cell(r, 1).font = BOLD
         ws.cell(r, 2).fill, ws.cell(r, 2).border = RESULT, BOX
-    assert 12 + len(summary) < 27
+    for r in (12, 14, 16, 18):
+        ws.cell(r, 2).number_format = "yyyy-mm-dd"
+    ws.cell(18, 1).font = Font(bold=True, color="C00000")
+    assert 12 + len(summary) < first - 2
 
     hr = first - 1
-    ws.cell(hr - 1, 1).value = "▼ 월별 산정표"
+    ws.cell(hr - 1, 1).value = "▼ 본공사 구간 월별 산정표 (준비기간·정리기간은 비작업일수 없이 달력일수로 더함)"
     ws.cell(hr - 1, 1).font = BOLD
-    heads = ["순번", "연월", "달력일수", "법정공휴일 B", "기후여건 A", "중복일수 C", "A+B-C", "적용 비작업일수(월8일↑)", "작업가능일수",
+    heads = ["순번", "연월", "달력일수 (첫 달은 본공사 시작일부터)", "법정공휴일 B", "기후여건 A", "중복일수 C", "A+B-C", "적용 비작업일수(월8일↑)", "작업가능일수",
              "전월말 잔여 작업일수", "이 달 작업일수", "이 달 비작업일수", "이 달 소요일수", "월말 잔여 작업일수"]
     for j, h in enumerate(heads):
         ws.cell(hr, 1 + j).value = h
     _hdr(ws, hr, range(1, 15))
-    ws.row_dimensions[hr].height = 48
-    helper = ["k", "연", "월", "달력", "공휴", "기후A", "중복C", "적용", "가능", "전월누적", "표시"]
+    ws.row_dimensions[hr].height = 62
+    helper = ["k", "연", "월", "달력(유효)", "공휴", "기후A", "중복C", "적용", "가능", "전월누적", "표시"]
     for j, h in enumerate(helper):
         c = ws.cell(hr, 16 + j)
         c.value = h
@@ -619,15 +633,16 @@ def add_schedule_sheet(wb, info, n_hol):
     for i in range(60):
         r = first + i
         P, Q, R, S, Tt, U, V, W, X, Y, Z = (f"{L(16 + j)}{r}" for j in range(11))
+        full = f"DAY(EOMONTH(DATE({Q},{R},1),0))"
         ws[P] = i + 1
-        ws[Q] = f"=YEAR(EDATE(DATE($B$4,$B$5,1),{P}-1))"
-        ws[R] = f"=MONTH(EDATE(DATE($B$4,$B$5,1),{P}-1))"
-        ws[S] = f"=DAY(EOMONTH(DATE({Q},{R},1),0))"
+        ws[Q] = f"=YEAR(EDATE(DATE(YEAR($B$14),MONTH($B$14),1),{P}-1))"
+        ws[R] = f"=MONTH(EDATE(DATE(YEAR($B$14),MONTH($B$14),1),{P}-1))"
+        ws[S] = "=DAY(EOMONTH($B$14,0))-DAY($B$14)+1" if i == 0 else f"={full}"
         ws[Tt] = f"=IFERROR(INDEX(법정공휴일!$B$4:$M${n_hol},MATCH({Q},법정공휴일!$A$4:$A${n_hol},0),{R}),0)"
         ws[U] = f"=INDEX(CHOOSE($D$7,{sets}),1,{R})"
-        ws[V] = f"=ROUND({U}*{Tt}/{S},1)"
+        ws[V] = f"=ROUND({U}*{Tt}/{full},1)"
         ws[W] = f"=ROUND(MAX({U}+{Tt}-{V},8),0)"
-        ws[X] = f"={S}-{W}"
+        ws[X] = f"={S}*({full}-{W})/{full}"
         ws[Y] = 0 if i == 0 else f"={L(25)}{r - 1}+{L(24)}{r - 1}"
         ws[Z] = f"=IF(AND(ISNUMBER($B$9),$B$9>{Y}),1,0)"
         show = lambda expr: f'=IF({Z}=1,{expr},"")'
@@ -639,17 +654,17 @@ def add_schedule_sheet(wb, info, n_hol):
         ws.cell(r, 6).value = show(V)
         ws.cell(r, 7).value = show(f"ROUND({U}+{Tt}-{V},1)")
         ws.cell(r, 8).value = show(W)
-        ws.cell(r, 9).value = show(X)
+        ws.cell(r, 9).value = show(f"ROUND({X},1)")
         ws.cell(r, 10).value = show(f"$B$9-{Y}")
         ws.cell(r, 11).value = show(f"MIN({X},$B$9-{Y})")
-        ws.cell(r, 12).value = show(f"ROUND({W}*MIN({X},$B$9-{Y})/{X},1)")
+        ws.cell(r, 12).value = show(f"ROUND({W}*{S}/{full}*MIN({X},$B$9-{Y})/{X},1)")
         ws.cell(r, 13).value = show(f"K{r}+L{r}")
         ws.cell(r, 14).value = show(f"J{r}-K{r}")
         for c in range(1, 15):
             ws.cell(r, c).border = BOX
         for c in range(16, 27):
             ws.cell(r, c).font = Font(color="A0A0A0")
-    ws.column_dimensions["A"].width = 34
+    ws.column_dimensions["A"].width = 38
     ws.column_dimensions["B"].width = 20
     for col in range(3, 15):
         ws.column_dimensions[L(col)].width = 13
