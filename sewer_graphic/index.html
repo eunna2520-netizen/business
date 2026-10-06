@@ -94,6 +94,28 @@ td select{width:auto}
 .toast.show{opacity:1}
 .legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--muted)}
 .legend i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
+button,.tab{touch-action:manipulation}
+#prof{-webkit-touch-callout:none}
+.touch-only{display:none}
+/* 모바일 하단 조정바 */
+.mbar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:20;background:var(--panel);border-top:1px solid var(--line);
+  box-shadow:0 -6px 18px rgba(0,0,0,.08);padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));flex-direction:column;gap:7px}
+.mrow{display:flex;align-items:center;gap:6px;max-width:640px;width:100%;margin:0 auto}
+.mbar button{min-height:42px;min-width:44px;font-size:15px;padding:4px 8px;font-family:var(--mono)}
+.msel{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;line-height:1.25}
+.msel b{font-size:14px}
+.msel span{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.minv{flex:1;text-align:center;font-size:19px;font-weight:600;min-width:0}
+.minv small{display:block;font-size:10.5px;font-weight:400;color:var(--muted)}
+#mMode{font-family:var(--sans);font-size:13px}
+@media (pointer:coarse),(max-width:1000px){
+  .mbar{display:flex}
+  body{padding-bottom:150px}
+  .touch-only{display:block}.kbd-only{display:none}
+  .plan-card{order:2}
+  td input,.crit input,td select,.dlg textarea{font-size:16px}
+  .toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+}
 @media (prefers-reduced-motion: reduce){.toast{transition:none}}
 </style>
 
@@ -134,7 +156,7 @@ td select{width:auto}
 
   <div class="grid">
     <div class="col">
-      <div class="card">
+      <div class="card plan-card">
         <div class="card-h"><h2>관망 평면 (모식도)</h2><div class="sp"></div>
           <div class="legend"><span><i style="background:var(--good)"></i>적합</span><span><i style="background:var(--warn)"></i>유속·토피 주의</span><span><i style="background:var(--bad)"></i>용량·역구배·접합 불량</span></div>
         </div>
@@ -146,7 +168,8 @@ td select{width:auto}
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
           <div class="sp"></div>
-          <div class="hint">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동</div>
+          <div class="hint touch-only">관저 점을 눌러 선택 → 위아래로 끌거나 하단 버튼(길게 누르면 연속)으로 조정 · 좌우로 밀면 종단 스크롤</div>
+          <div class="hint kbd-only">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동</div>
         </div>
         <div class="scroll" id="profWrap"><svg id="prof" aria-label="종단면도"></svg></div>
       </div>
@@ -181,6 +204,19 @@ td select{width:auto}
       <div class="seg"><button id="tRoute" class="on">현재 노선</button><button id="tAll">전체 관로</button></div>
     </div>
     <div class="tblwrap"><table id="tbl"></table></div>
+  </div>
+</div>
+<div class="mbar" id="mbar" aria-label="관저고 조정">
+  <div class="mrow">
+    <button id="mPrev" aria-label="이전 점">◀</button>
+    <div class="msel"><b id="mSel"></b><span id="mInfo" class="mono"></span></div>
+    <button id="mNext" aria-label="다음 점">▶</button>
+    <button id="mMode" aria-label="조정 방식 전환"></button>
+  </div>
+  <div class="mrow">
+    <button data-step="-0.1" aria-label="0.10 내리기">−.10</button><button data-step="-0.01" aria-label="0.01 내리기">−.01</button>
+    <div class="minv mono" id="mInv"></div>
+    <button data-step="0.01" aria-label="0.01 올리기">+.01</button><button data-step="0.1" aria-label="0.10 올리기">+.10</button>
   </div>
 </div>
 <div class="toast" id="toast" role="status"></div>
@@ -333,6 +369,7 @@ const undo=[],redo=[];
 let drag=null;
 
 const P=id=>pipes.find(p=>p.id===id);
+const COARSE=matchMedia('(pointer:coarse)').matches;
 const stCls=s=>['good','warn','bad'][s];
 const f2=v=>(+v).toFixed(2),f3=v=>(+v).toFixed(3),f4=v=>(+v).toFixed(4);
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -355,7 +392,7 @@ function render(){
   if(!routes.has(ui.route))ui.route=routes.keys().next().value;
   if(!P(ui.sel)){ui.sel=routes.get(ui.route)[0].id;ui.handle=null;}
   res=compute(pipes,crit);
-  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();
+  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();
   $('#bUndo').disabled=!undo.length;$('#bRedo').disabled=!redo.length;
 }
 
@@ -371,7 +408,7 @@ function renderTabs(){
     return `<button class="tab${k===ui.route?' on':''}" data-r="${esc(k)}"><span style="color:var(--${stCls(worst)})">●</span> ${esc(k)}</button>`;}).join('');
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
-function selectRoute(r,pid){ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();}
+function selectRoute(r,pid){ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
 
 /* ---------- 평면 ---------- */
 function layoutPlan(){
@@ -496,16 +533,17 @@ function renderProfile(){
     const x1=X(g.cs[i])+MW/2,x2=X(g.cs[i+1])-MW/2;
     [['up',x1,p.invUp],['dn',x2,p.invDn]].forEach(([end,x,z])=>{
       const on=ui.handle&&ui.handle.pid===p.id&&ui.handle.end===end;
-      h+=`<g class="h" data-pid="${esc(p.id)}" data-end="${end}"><circle cx="${x+(end==='up'?6:-6)}" cy="${Y(z)}" r="11" fill="transparent"/>`+
+      h+=`<g class="h" data-pid="${esc(p.id)}" data-end="${end}"><circle cx="${x+(end==='up'?(COARSE?9:6):(COARSE?-9:-6))}" cy="${Y(z)}" r="${COARSE?14:11}" fill="transparent"/>`+
          (on?`<circle cx="${x}" cy="${Y(z)}" r="9" fill="var(--accent)" opacity=".22"/>`:'')+
-         `<circle cx="${x}" cy="${Y(z)}" r="${on?5.5:4.5}" fill="${on?'var(--accent)':'var(--panel)'}" stroke="var(--accent)" stroke-width="1.6"/></g>`;
+         `<circle cx="${x}" cy="${Y(z)}" r="${(on?5.5:4.5)+(COARSE?1.5:0)}" fill="${on?'var(--accent)':'var(--panel)'}" stroke="var(--accent)" stroke-width="1.6"/></g>`;
     });
   });
   if(drag&&drag.moved){
     const p=P(drag.pid),i=g.ch.indexOf(p);
     if(i>=0){const end=drag.end==='body'?'dn':drag.end,x=end==='up'?X(g.cs[i])+MW/2:X(g.cs[i+1])-MW/2,z=end==='up'?p.invUp:p.invDn,r=res.get(p.id);
       const txt=`INV ${f2(z)}  S ${r.S.toFixed(2)}‰  V ${r.V.toFixed(2)}`,tw=txt.length*6.4+12,tx=Math.min(Math.max(x-tw/2,L0),W-R0-tw);
-      h+=`<g pointer-events="none"><rect x="${tx}" y="${Y(z)+14}" width="${tw}" height="18" rx="4" fill="var(--ink)"/><text x="${tx+6}" y="${Y(z)+27}" font-size="10.5" fill="var(--bg)">${txt}</text></g>`;}
+      const ty=drag.touch?Y(z)-52:Y(z)+14;
+      h+=`<g pointer-events="none"><rect x="${tx}" y="${ty}" width="${tw}" height="18" rx="4" fill="var(--ink)"/><text x="${tx+6}" y="${ty+13}" font-size="10.5" fill="var(--bg)">${txt}</text></g>`;}
   }
   // 하단 데이터 밴드 (종단도 표)
   h+=`<rect x="0" y="${bandTop}" width="${W-R0+6}" height="${bandRows.length*row}" fill="var(--panel2)" stroke="var(--line)"/>`;
@@ -538,7 +576,7 @@ svgP.addEventListener('pointerdown',e=>{
   const end=t.dataset.end;
   e.preventDefault();
   ui.sel=pid;if(end!=='body')ui.handle={pid,end};
-  drag={pid,end,y0:e.clientY,before:snapshot(),base:JSON.parse(snapshot()),moved:false,
+  drag={pid,end,y0:e.clientY,before:snapshot(),base:JSON.parse(snapshot()),moved:false,touch:e.pointerType==='touch',
         linked:e.ctrlKey?false:e.altKey?true:ui.linked,scale:svgP.getBoundingClientRect().height/svgP.height.baseVal.value};
   svgP.setPointerCapture(e.pointerId);
   render();
@@ -548,7 +586,7 @@ svgP.addEventListener('pointermove',e=>{
   const dy=(e.clientY-drag.y0)/drag.scale;
   if(!drag.moved&&Math.abs(dy)<3)return;
   drag.moved=true;
-  const delta=Math.round(-dy/ui.ppm*100)/100;
+  const delta=Math.round(-dy/ui.ppm*(drag.touch?0.5:1)*100)/100; // 터치는 절반 감도로 정밀 조정
   pipes=clone(drag.base);
   if(delta){
     if(drag.end==='body'){shiftEnd(drag.pid,'up',delta,drag.linked);shiftEnd(drag.pid,'dn',delta,drag.linked);}
@@ -575,10 +613,7 @@ document.addEventListener('keydown',e=>{
   }
   if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
     e.preventDefault();
-    const ch=routes.get(ui.route),list=[];ch.forEach(p=>{list.push({pid:p.id,end:'up'});list.push({pid:p.id,end:'dn'});});
-    let i=list.findIndex(h=>h.pid===ui.handle.pid&&h.end===ui.handle.end);
-    i=Math.max(0,Math.min(list.length-1,i+(e.key==='ArrowRight'?1:-1)));
-    ui.handle=list[i];ui.sel=list[i].pid;render();
+    moveHandle(e.key==='ArrowRight'?1:-1);
   }
 });
 function doUndo(){if(!undo.length)return;redo.push(snapshot());pipes=JSON.parse(undo.pop());render();}
@@ -656,7 +691,7 @@ $('#tRoute').onclick=()=>{ui.tableAll=false;$('#tRoute').classList.add('on');$('
 $('#tAll').onclick=()=>{ui.tableAll=true;$('#tAll').classList.add('on');$('#tRoute').classList.remove('on');render();};
 
 /* ---------- 상단 버튼 ---------- */
-const setMode=l=>{ui.linked=l;$('#mLinked').classList.toggle('on',l);$('#mSingle').classList.toggle('on',!l);};
+const setMode=l=>{ui.linked=l;$('#mLinked').classList.toggle('on',l);$('#mSingle').classList.toggle('on',!l);renderMbar();};
 $('#mLinked').onclick=()=>setMode(true);$('#mSingle').onclick=()=>setMode(false);
 $('#bUndo').onclick=doUndo;$('#bRedo').onclick=doRedo;
 $('#bReset').onclick=()=>edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});
@@ -682,6 +717,47 @@ $('#bApply').onclick=()=>{
   routes=routesOf(pipes);selectRoute(routes.keys().next().value);
   $('#dlg').hidden=true;toast(`관로 ${np.length}개를 불러왔습니다`);
 };
+
+/* ---------- 모바일 하단 조정바 ---------- */
+function handleList(){const l=[];routes.get(ui.route).forEach(p=>{l.push({pid:p.id,end:'up'});l.push({pid:p.id,end:'dn'});});return l;}
+function moveHandle(k){
+  const list=handleList();
+  let i=ui.handle?list.findIndex(h=>h.pid===ui.handle.pid&&h.end===ui.handle.end):-1;
+  i=Math.max(0,Math.min(list.length-1,i<0?0:i+k));
+  ui.handle=list[i];ui.sel=list[i].pid;render();scrollToHandle();
+}
+function scrollToHandle(){
+  if(!ui.handle)return;
+  const el=document.querySelector(`#prof g.h[data-pid="${CSS.escape(ui.handle.pid)}"][data-end="${ui.handle.end}"] circle:last-child`);
+  const wrap=$('#profWrap');if(!el)return;
+  const x=+el.getAttribute('cx');
+  if(x<wrap.scrollLeft+40||x>wrap.scrollLeft+wrap.clientWidth-40)wrap.scrollLeft=x-wrap.clientWidth/2;
+}
+function renderMbar(){
+  $('#mMode').textContent=ui.linked?'연동':'단독';
+  $('#mMode').classList.toggle('on',ui.linked);
+  const hd=ui.handle&&P(ui.handle.pid);
+  if(!hd){$('#mSel').textContent='관저 점을 선택하세요';$('#mInfo').textContent='';$('#mInv').innerHTML='—';return;}
+  const r=res.get(hd.id),node=ui.handle.end==='up'?hd.up:hd.dn,z=ui.handle.end==='up'?hd.invUp:hd.invDn;
+  $('#mSel').textContent=`${hd.id} ${ui.handle.end==='up'?'상류단':'하류단'} · ${node}`;
+  $('#mInfo').innerHTML=`S ${r.S.toFixed(2)}‰ · V ${r.V.toFixed(2)} · <span class="remark ${stCls(r.st)}">${esc(r.rem.join(' '))}</span>`;
+  $('#mInv').innerHTML=`${f2(z)}<small>관저고 (m)</small>`;
+}
+$('#mPrev').onclick=()=>moveHandle(-1);
+$('#mNext').onclick=()=>moveHandle(1);
+$('#mMode').onclick=()=>setMode(!ui.linked);
+document.querySelectorAll('#mbar [data-step]').forEach(b=>{
+  const step=+b.dataset.step;
+  b.addEventListener('pointerdown',e=>{
+    e.preventDefault();if(!ui.handle)return;
+    const before=snapshot(),go=()=>{shiftEnd(ui.handle.pid,ui.handle.end,step,ui.linked);render();};
+    go();let t=setTimeout(function rep(){go();t=setTimeout(rep,70);},400),done=false;
+    const stop=()=>{if(done)return;done=true;clearTimeout(t);if(snapshot()!==before)commit(before);render();};
+    ['pointerup','pointercancel','pointerleave'].forEach(ev=>b.addEventListener(ev,stop,{once:true}));
+  });
+  b.addEventListener('click',e=>{if(e.detail===0&&ui.handle)edit(()=>shiftEnd(ui.handle.pid,ui.handle.end,step,ui.linked));});
+  b.addEventListener('contextmenu',e=>e.preventDefault());
+});
 
 new ResizeObserver(()=>{if(!drag){renderPlan();renderProfile();}}).observe($('#profWrap'));
 render();
