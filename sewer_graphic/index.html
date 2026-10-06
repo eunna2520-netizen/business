@@ -1,0 +1,688 @@
+<title>오수관로 종단 편집기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: 도면 작업대 — 상단 툴바, 좌측 평면+종단(주 작업면), 우측 단면·판정, 하단 수리계산표 */
+:root{
+  --bg:#ECEFED; --panel:#F9FAF9; --panel2:#F1F4F2; --ink:#18211D; --muted:#5B6863; --line:#C9D1CD; --grid:#DDE3E0;
+  --accent:#1D5DA8; --accent-soft:#D9E6F5;
+  --ground:#7A6236; --soil:#E3DAC6; --pipe:#7E8984; --pipe-fill:#D5DAD7;
+  --sewage:#B07E22; --sewage-fill:#D9A84A;
+  --good:#2C7A4C; --good-soft:#DCEFE2; --warn:#A86A10; --warn-soft:#F6E7C8; --bad:#BE3328; --bad-soft:#F7DAD6;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#111614; --panel:#18201D; --panel2:#1E2723; --ink:#E2E8E5; --muted:#93A19B; --line:#2F3A35; --grid:#26302C;
+  --accent:#6FA8EE; --accent-soft:#1E3350;
+  --ground:#BFA472; --soil:#2B2619; --pipe:#7C8883; --pipe-fill:#33403B;
+  --sewage:#D9A441; --sewage-fill:#9C7424;
+  --good:#5DC28B; --good-soft:#173826; --warn:#E5B04E; --warn-soft:#3B2E12; --bad:#F06D61; --bad-soft:#41201C;
+  color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111614; --panel:#18201D; --panel2:#1E2723; --ink:#E2E8E5; --muted:#93A19B; --line:#2F3A35; --grid:#26302C;
+  --accent:#6FA8EE; --accent-soft:#1E3350;
+  --ground:#BFA472; --soil:#2B2619; --pipe:#7C8883; --pipe-fill:#33403B;
+  --sewage:#D9A441; --sewage-fill:#9C7424;
+  --good:#5DC28B; --good-soft:#173826; --warn:#E5B04E; --warn-soft:#3B2E12; --bad:#F06D61; --bad-soft:#41201C;
+  color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.45;padding-inline:16px;padding-block:14px 40px}
+.wrap{max-width:1480px;margin:0 auto;display:flex;flex-direction:column;gap:14px}
+h1{font-size:18px;font-weight:700;margin:0;letter-spacing:-.01em;text-wrap:balance}
+h2{font-size:12px;font-weight:600;margin:0;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+.mono,.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button,select,input{font:inherit;color:inherit}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--accent)}
+button:disabled{opacity:.45;cursor:default}
+button.on{background:var(--accent);border-color:var(--accent);color:var(--panel)}
+button:focus-visible,select:focus-visible,input:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.bar{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px}
+.bar .sp{flex:1}
+.sub{color:var(--muted);font-size:12.5px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--panel)}
+.seg button{border:0;border-radius:0;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:999px;background:var(--panel2);border:1px solid var(--line)}
+.chip.good{background:var(--good-soft);color:var(--good);border-color:transparent}
+.chip.warn{background:var(--warn-soft);color:var(--warn);border-color:transparent}
+.chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
+.card-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+@media (max-width:1000px){.grid{grid-template-columns:minmax(0,1fr)}}
+.tabs{display:flex;gap:4px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:var(--panel2);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:13px}
+.tab.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+svg text{font-family:var(--mono);font-variant-numeric:tabular-nums}
+#plan{display:block;width:100%;height:210px}
+#prof{display:block;user-select:none;-webkit-user-select:none}
+#prof .h,#prof .pb{touch-action:none;cursor:ns-resize}
+#prof .pb{cursor:grab}
+.hint{font-size:12px;color:var(--muted)}
+.hint kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 4px;background:var(--panel2)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.btns{display:flex;flex-wrap:wrap;gap:6px}
+.remark{font-family:var(--mono);font-size:12px;font-weight:600}
+.remark.good{color:var(--good)}.remark.warn{color:var(--warn)}.remark.bad{color:var(--bad)}
+.crit{display:grid;grid-template-columns:1fr 84px;gap:6px 10px;align-items:center;font-size:13px}
+.crit input{width:100%;border:1px solid var(--line);border-radius:5px;padding:3px 6px;background:var(--panel2);font-family:var(--mono);text-align:right}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:4px 7px;border-bottom:1px solid var(--grid);text-align:right;white-space:nowrap}
+th{font-weight:600;color:var(--muted);font-size:11.5px;position:sticky;top:0;background:var(--panel)}
+td{font-family:var(--mono);font-variant-numeric:tabular-nums}
+td.l,th.l{text-align:left}
+tr.sel td{background:var(--accent-soft)}
+tbody tr{cursor:pointer}
+td input,td select{width:68px;border:1px solid transparent;border-radius:4px;background:transparent;padding:2px 4px;font-family:var(--mono);text-align:right;font-size:12.5px}
+td input:hover,td select:hover{border-color:var(--line)}
+td input:focus{border-color:var(--accent);background:var(--panel2);outline:none}
+td select{width:auto}
+.tblwrap{overflow:auto;max-height:420px}
+.dlg{background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.dlg textarea{width:100%;min-height:170px;font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:8px;white-space:pre;overflow:auto}
+.err{color:var(--bad);font-size:12.5px;font-family:var(--mono);white-space:pre-wrap}
+.toast{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:7px 14px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.show{opacity:1}
+.legend{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:11.5px;color:var(--muted)}
+.legend i{display:inline-block;width:14px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
+@media (prefers-reduced-motion: reduce){.toast{transition:none}}
+</style>
+
+<div class="wrap">
+  <div class="bar">
+    <div>
+      <h1>오수관로 종단 편집기</h1>
+      <div class="sub">오수 원단위식 · Manning 등류 · 가상 예제 관망 (본선 + 분기 3개)</div>
+    </div>
+    <div class="sp"></div>
+    <div class="chips" id="summary"></div>
+  </div>
+
+  <div class="bar">
+    <div class="seg" role="group" aria-label="조정 방식">
+      <button id="mLinked" class="on" title="맨홀의 유입·유출 관저를 같은 양만큼 함께 이동 (단차 유지)">맨홀 연동</button>
+      <button id="mSingle" title="선택한 관 끝점만 이동 (드롭맨홀 등)">끝점 단독</button>
+    </div>
+    <div class="btns">
+      <button id="bUndo" title="Ctrl+Z">되돌리기</button>
+      <button id="bRedo" title="Ctrl+Y">다시하기</button>
+      <button id="bReset">예제 초기화</button>
+    </div>
+    <div class="sp"></div>
+    <div class="btns">
+      <button id="bPaste">엑셀 붙여넣기</button>
+      <button id="bCopyIn">입력양식 복사</button>
+      <button id="bCopyOut">계산결과 복사</button>
+    </div>
+  </div>
+
+  <div class="dlg" id="dlg" hidden>
+    <div class="bar"><strong>엑셀에서 붙여넣기</strong><span class="sub">열 순서 A~V: 노선명 · 관로번호 · 상류맨홀 · 하류맨홀 · 연장 · 배수면적 · 폭 · 관경 · 련수 · 상류지반고 · 하류지반고 · 상류관저고 · 하류관저고 · 조도계수 · 유출계수 · 외부유입 · 유입시간 · 비고 · 인구밀도 · 오수단위 · 지하수단위 · P.F</span></div>
+    <textarea id="pasteBox" spellcheck="false" placeholder="엑셀에서 관로 행을 선택해 복사(Ctrl+C)한 뒤 여기에 붙여넣기(Ctrl+V). 제목 행은 자동으로 건너뜁니다."></textarea>
+    <div class="err" id="pasteErr"></div>
+    <div class="btns"><button id="bApply" class="on">적용</button><button id="bClose">닫기</button></div>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <div class="card">
+        <div class="card-h"><h2>관망 평면 (모식도)</h2><div class="sp"></div>
+          <div class="legend"><span><i style="background:var(--good)"></i>적합</span><span><i style="background:var(--warn)"></i>유속·토피 주의</span><span><i style="background:var(--bad)"></i>용량·역구배·접합 불량</span></div>
+        </div>
+        <svg id="plan" aria-label="관망 평면 모식도"></svg>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <h2>종단</h2>
+          <div class="tabs" id="tabs"></div>
+          <div class="sp"></div>
+          <div class="hint">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동</div>
+        </div>
+        <div class="scroll" id="profWrap"><svg id="prof" aria-label="종단면도"></svg></div>
+      </div>
+    </div>
+
+    <div class="col">
+      <div class="card">
+        <div class="card-h"><h2>선택 관로 단면</h2><div class="sp"></div><span class="mono" id="secId"></span></div>
+        <svg id="sec" viewBox="0 0 270 190" style="width:100%;max-width:300px;display:block;margin:0 auto"></svg>
+        <dl class="kv" id="secKv"></dl>
+        <div style="height:10px"></div>
+        <div class="btns">
+          <button id="bFitV" title="유속이 최소유속 이상이 되는 최소 경사로 하류 관저고 조정">최소유속 경사 맞춤</button>
+          <button id="bAutoD" title="현재 경사에서 여유율을 만족하는 최소 관경">관경 자동</button>
+          <button id="bDUp">관경 ▲</button><button id="bDDn">관경 ▼</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h"><h2>판정 기준</h2></div>
+        <div class="crit">
+          <label for="cVmin">최소유속 (m/s)</label><input id="cVmin" type="number" step="0.05" value="0.6">
+          <label for="cVmax">최대유속 (m/s)</label><input id="cVmax" type="number" step="0.1" value="3.0">
+          <label for="cCover">최소토피 (m)</label><input id="cCover" type="number" step="0.1" value="1.0">
+        </div>
+        <p class="hint" style="margin:10px 0 0">설계유량 = (오수단위 × P.F + 지하수단위) × 누가인구 / 86,400,000 [m³/s]. 여유율은 관경 600 이하 100%, 700~1500 50%, 1650 이상 25% (하수도시설기준 오수관거). 유속은 계획시간최대오수량의 등류 실유속으로 판정합니다.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-h"><h2>수리계산표</h2><div class="sp"></div>
+      <div class="seg"><button id="tRoute" class="on">현재 노선</button><button id="tAll">전체 관로</button></div>
+    </div>
+    <div class="tblwrap"><table id="tbl"></table></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+
+<script id="engine">
+/* ---------- 계산 엔진 (UI 독립) ---------- */
+const DIAS=[200,250,300,350,400,450,500,600,700,800,900,1000,1100,1200,1350,1500,1650,1800];
+const COLS=['line','id','up','dn','L','area','W','D','nb','ghUp','ghDn','invUp','invDn','n','C','ext','tin','note','dens','won','gwon','pf'];
+const HEAD=['노선명','관로번호','상류맨홀','하류맨홀','연장','배수면적','폭','관경','련수','상류지반고','하류지반고','상류관저고','하류관저고','조도계수','유출계수','외부유입','유입시간','비고','인구밀도','오수단위','지하수단위','P.F'];
+// 가상 예제 데이터 (실제 현장 아님)
+const SAMPLE=[
+ ['본선','P-01','MH1','MH2',45,3.2,0,200,1,52.40,52.05,50.82,50.42,0.013,0,0,0,'',160,300,30,1.5],
+ ['본선','P-02','MH2','MH3',50,2.8,0,200,1,52.05,51.60,50.40,50.10,0.013,0,0,0,'',160,300,30,1.5],
+ ['본선','P-03','MH3','MH4',55,3.5,0,250,1,51.60,51.30,50.05,49.97,0.013,0,0,0,'',160,300,30,1.5],
+ ['본선','P-04','MH4','MH5',48,2.4,0,250,1,51.30,50.95,49.95,49.60,0.013,0,0,0,'',160,300,30,1.5],
+ ['본선','P-05','MH5','MH6',52,2.6,0,250,1,50.95,50.40,49.58,49.10,0.013,0,0,0,'',160,300,30,1.5],
+ ['본선','P-06','MH6','MH7',50,3.0,0,250,1,50.40,50.20,49.05,48.92,0.013,0,0.012,0,'상가 직접유입',160,300,30,1.5],
+ ['본선','P-07','MH7','MH8',46,2.2,0,350,1,50.20,49.90,48.85,48.50,0.013,0,0,0,'',160,300,30,1.5],
+ ['본선','P-08','MH8','MH9',40,1.5,0,350,1,49.90,49.70,48.47,48.25,0.013,0,0,0,'차집관 연결',160,300,30,1.5],
+ ['지선1','A-01','MA1','MA2',42,2.5,0,200,1,53.10,52.70,51.80,51.57,0.013,0,0,0,'',160,300,30,1.5],
+ ['지선1','A-02','MA2','MA3',38,2.0,0,200,1,52.70,52.20,51.55,50.95,0.013,0,0,0,'',160,300,30,1.5],
+ ['지선1','A-03','MA3','MH3',35,1.8,0,200,1,52.20,51.60,50.93,50.30,0.013,0,0,0,'',160,300,30,1.5],
+ ['지선2','B-01','MB1','MB2',44,3.0,0,200,1,51.80,51.30,50.43,50.05,0.013,0,0,0,'',180,300,30,1.5],
+ ['지선2','B-02','MB2','MH6',40,2.6,0,200,1,51.30,50.40,50.02,48.98,0.013,0,0,0,'',180,300,30,1.5],
+ ['지선2-1','C-01','MC1','MC2',36,2.2,0,200,1,52.30,51.90,50.95,50.55,0.013,0,0,0,'',180,300,30,1.5],
+ ['지선2-1','C-02','MC2','MB2',30,1.6,0,200,1,51.90,51.30,50.53,50.10,0.013,0,0,0,'',180,300,30,1.5],
+];
+function rowToPipe(r){const p={};COLS.forEach((k,i)=>p[k]=r[i]);return p;}
+const r3=v=>Math.round(v*1000)/1000;
+const marginFor=D=>D<=600?1.0:D<=1500?0.5:0.25;
+
+function circ(D,th){const A=D*D/8*(th-Math.sin(th)),P=D*th/2;return{A,P,R:P>0?A/P:0,h:D/2*(1-Math.cos(th/2))};}
+const TH_MAX=2*Math.acos(1-2*0.938);
+function flowAt(D,th,S,n){const c=circ(D,th);return c.A*Math.pow(c.R,2/3)*Math.sqrt(S)/n;}
+// 원형관 등류 수심: 주어진 Q, S로 정상수심 h, 유속 V
+function uniform(D,Q,S,n){
+  const full=circ(D,2*Math.PI);
+  const Qfull=full.A*Math.pow(full.R,2/3)*Math.sqrt(S)/n, Vfull=Qfull/full.A;
+  if(Q<=0)return{h:0,V:0,Qfull,Vfull,Afull:full.A,sur:false};
+  const Qmax=flowAt(D,TH_MAX,S,n);
+  if(Q>Qmax)return{h:D,V:Q/full.A,Qfull,Vfull,Afull:full.A,sur:true};
+  let lo=0,hi=TH_MAX;
+  for(let i=0;i<60;i++){const m=(lo+hi)/2;if(flowAt(D,m,S,n)<Q)lo=m;else hi=m;}
+  const c=circ(D,(lo+hi)/2);
+  return{h:c.h,V:Q/c.A,Qfull,Vfull,Afull:full.A,sur:false};
+}
+function chainOrder(list){
+  const dns=new Set(list.map(p=>p.dn));
+  const start=list.find(p=>!dns.has(p.up))||list[0];
+  const out=[],used=new Set();let cur=start;
+  while(cur&&!used.has(cur)){out.push(cur);used.add(cur);cur=list.find(q=>q.up===cur.dn&&!used.has(q));}
+  list.forEach(p=>{if(!used.has(p))out.push(p);});
+  return out;
+}
+function routesOf(pipes){
+  const m=new Map();pipes.forEach(p=>{if(!m.has(p.line))m.set(p.line,[]);m.get(p.line).push(p);});
+  const ups=new Set(pipes.map(p=>p.up));
+  const outlet=pipes.find(p=>!ups.has(p.dn));
+  const res=new Map();
+  if(outlet)res.set(outlet.line,chainOrder(m.get(outlet.line)));
+  for(const [k,v] of m)if(!res.has(k))res.set(k,chainOrder(v));
+  return res;
+}
+function compute(pipes,crit){
+  const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
+  const memo=new Map(),stack=new Set();
+  const acc=p=>{
+    if(memo.has(p.id))return memo.get(p.id);
+    if(stack.has(p.id))return{pop:0,Q:0,loop:true};
+    stack.add(p.id);
+    const popL=(+p.area||0)*(+p.dens||0);
+    const QL=((+p.won||0)*(+p.pf||1)+(+p.gwon||0))*popL/86400000+(+p.ext||0);
+    let pop=popL,Q=QL;
+    (byDn.get(p.up)||[]).forEach(q=>{const a=acc(q);pop+=a.pop;Q+=a.Q;});
+    stack.delete(p.id);
+    const r={popL,pop,QL,Q};memo.set(p.id,r);return r;
+  };
+  const out=new Map();
+  pipes.forEach(p=>{
+    const a=acc(p),D=p.D/1000,nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
+    const S=(p.invUp-p.invDn)/p.L;
+    const margin=marginFor(p.D);
+    let u,adverse=S<=0;
+    if(adverse){const full=circ(D,2*Math.PI);u={h:D,V:Math.max(0.1,a.Q/nb/full.A),Qfull:0,Vfull:0,Afull:full.A,sur:true};}
+    else u=uniform(D,a.Q/nb,S,n);
+    const Qfull=u.Qfull*nb,Qallow=Qfull/(1+margin),use=Qallow>0?a.Q/Qallow:Infinity;
+    const covUp=p.ghUp-p.invUp-D,covDn=p.ghDn-p.invDn-D;
+    const rem=[];let st=0;
+    const bump=s=>{if(s>st)st=s;};
+    if(adverse){rem.push('Adverse Slope');bump(2);}
+    else{
+      if(use>1){rem.push('NG_'+Math.round(use*100)+'%');bump(2);}
+      if(u.V<crit.vmin){rem.push('LESS'+u.V.toFixed(2));bump(1);}
+      if(u.V>crit.vmax){rem.push('UPPR'+u.V.toFixed(2));bump(1);}
+    }
+    const cmin=Math.min(covUp,covDn);
+    if(cmin<crit.cover-0.0005){rem.push('COVER'+cmin.toFixed(2));bump(1);}
+    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null});
+  });
+  // 맨홀 접합 검토: 유입관 하류관저가 유출관 상류관저보다 낮으면 역류
+  const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
+  pipes.forEach(p=>{
+    const outs=byUp.get(p.dn)||[];if(!outs.length)return;
+    const lowOut=Math.min(...outs.map(q=>q.invUp));
+    if(p.invDn<lowOut-0.0005){const r=out.get(p.id);r.joint=lowOut-p.invDn;r.rem.push('JOINT-'+r.joint.toFixed(2));r.st=2;}
+  });
+  pipes.forEach(p=>{const r=out.get(p.id);if(!r.rem.length)r.rem.push('GOOD');});
+  return out;
+}
+function slopeForV(p,Q,target){
+  const D=p.D/1000,nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
+  const v=S=>uniform(D,Q/nb,S,n).V;
+  let lo=1e-5,hi=0.3;if(v(hi)<target)return hi;
+  for(let i=0;i<60;i++){const m=(lo+hi)/2;if(v(m)<target)lo=m;else hi=m;}
+  return hi;
+}
+function parseTSV(text){
+  const errs=[],pipes=[],ids=new Set();
+  text.replace(/\r/g,'').split('\n').forEach((ln,i)=>{
+    if(!ln.trim())return;
+    const c=ln.split('\t').map(s=>s.trim());
+    if(c.length<13||!isFinite(parseFloat(c[4]))){return;}
+    const num=k=>{const v=parseFloat(c[k]);return isFinite(v)?v:0;};
+    const p={line:c[0]||'노선',id:c[1],up:c[2],dn:c[3],L:num(4),area:num(5),W:num(6),D:num(7),nb:num(8)||1,
+      ghUp:num(9),ghDn:num(10),invUp:num(11),invDn:num(12),n:num(13)||0.013,C:num(14),ext:num(15),tin:num(16),note:c[17]||'',
+      dens:num(18),won:num(19),gwon:num(20),pf:num(21)||1};
+    const at=`${i+1}행`;
+    if(!p.id)errs.push(`${at}: 관로번호가 비어 있음`);
+    else if(ids.has(p.id))errs.push(`${at}: 관로번호 ${p.id} 중복`);
+    if(!p.up||!p.dn)errs.push(`${at}: 상류/하류 맨홀 이름 누락`);
+    if(p.L<=0)errs.push(`${at}: 연장은 0보다 커야 함`);
+    if(p.D<=0)errs.push(`${at}: 관경이 0 이하`);
+    ids.add(p.id);pipes.push(p);
+  });
+  if(!pipes.length)errs.push('관로 행을 찾지 못함 (5번째 열 "연장"이 숫자인 행만 읽습니다)');
+  return{pipes,errs};
+}
+</script>
+
+<script>
+/* ---------- UI ---------- */
+const $=s=>document.querySelector(s);
+const NS='http://www.w3.org/2000/svg';
+const clone=o=>JSON.parse(JSON.stringify(o));
+const crit={vmin:0.6,vmax:3.0,cover:1.0};
+let pipes=SAMPLE.map(rowToPipe);
+let res=null,routes=null;
+const ui={route:'본선',sel:'P-03',handle:{pid:'P-03',end:'dn'},linked:true,tableAll:false,yFrame:null};
+const undo=[],redo=[];
+let drag=null;
+
+const P=id=>pipes.find(p=>p.id===id);
+const stCls=s=>['good','warn','bad'][s];
+const f2=v=>(+v).toFixed(2),f3=v=>(+v).toFixed(3),f4=v=>(+v).toFixed(4);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(toast._t);toast._t=setTimeout(()=>t.classList.remove('show'),1800);}
+function snapshot(){return JSON.stringify(pipes);}
+function commit(before){undo.push(before);if(undo.length>200)undo.shift();redo.length=0;}
+function edit(fn){const b=snapshot();fn();if(snapshot()!==b)commit(b);render();}
+
+function shiftEnd(pid,end,delta,linked){
+  const p=P(pid);if(!p)return;
+  const node=end==='up'?p.up:p.dn;
+  const targets=linked?[]:[{p,end}];
+  if(linked)pipes.forEach(q=>{if(q.line!==p.line)return;if(q.up===node)targets.push({p:q,end:'up'});if(q.dn===node)targets.push({p:q,end:'dn'});});
+  targets.forEach(t=>{if(t.end==='up')t.p.invUp=r3(t.p.invUp+delta);else t.p.invDn=r3(t.p.invDn+delta);});
+}
+
+function render(){
+  routes=routesOf(pipes);
+  if(!routes.has(ui.route))ui.route=routes.keys().next().value;
+  if(!P(ui.sel)){ui.sel=routes.get(ui.route)[0].id;ui.handle=null;}
+  res=compute(pipes,crit);
+  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();
+  $('#bUndo').disabled=!undo.length;$('#bRedo').disabled=!redo.length;
+}
+
+function renderSummary(){
+  let c=[0,0,0];res.forEach(r=>c[r.st]++);
+  const out=[...res.values()].reduce((a,r)=>Math.max(a,r.Q),0);
+  $('#summary').innerHTML=`<span class="chip">관로 ${pipes.length}</span><span class="chip">방류 Q ${f4(out)} m³/s</span>`+
+    `<span class="chip good">적합 ${c[0]}</span><span class="chip warn">주의 ${c[1]}</span><span class="chip bad">불량 ${c[2]}</span>`;
+}
+function renderTabs(){
+  $('#tabs').innerHTML=[...routes.keys()].map(k=>{
+    const worst=Math.max(...routes.get(k).map(p=>res.get(p.id).st));
+    return `<button class="tab${k===ui.route?' on':''}" data-r="${esc(k)}"><span style="color:var(--${stCls(worst)})">●</span> ${esc(k)}</button>`;}).join('');
+}
+$('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
+function selectRoute(r,pid){ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();}
+
+/* ---------- 평면 ---------- */
+function layoutPlan(){
+  const pos={},dirOf={},placed=new Set(),names=[...routes.keys()],side={};
+  const place=(nm,anchor,dir)=>{
+    const ch=routes.get(nm),last=ch[ch.length-1];
+    if(!pos[last.dn])pos[last.dn]=anchor;
+    for(let i=ch.length-1;i>=0;i--){const p=ch[i],b=pos[p.dn]||anchor;if(!pos[p.up])pos[p.up]=[b[0]+dir[0]*p.L,b[1]+dir[1]*p.L];}
+    dirOf[nm]=dir;placed.add(nm);
+  };
+  place(names[0],[0,0],[-1,0]);
+  for(let g=1;placed.size<names.length&&g<60;g++){
+    let moved=false;
+    for(const nm of names){
+      if(placed.has(nm))continue;
+      const ch=routes.get(nm),last=ch[ch.length-1];
+      if(!pos[last.dn])continue;
+      const parent=names.find(o=>placed.has(o)&&routes.get(o).some(p=>p.up===last.dn||p.dn===last.dn))||names[0];
+      const pd=dirOf[parent],k=side[parent]=(side[parent]||0)+1,s=k%2?1:-1;
+      place(nm,pos[last.dn],[-pd[1]*s,pd[0]*s]);moved=true;
+    }
+    if(!moved){const nm=names.find(n=>!placed.has(n));place(nm,[0,150*g],[-1,0]);}
+  }
+  return pos;
+}
+function renderPlan(){
+  const svg=$('#plan'),W=svg.clientWidth||600,H=210,pos=layoutPlan();
+  const xs=Object.values(pos).map(p=>p[0]),ys=Object.values(pos).map(p=>p[1]);
+  const x0=Math.min(...xs),x1=Math.max(...xs),y0=Math.min(...ys),y1=Math.max(...ys);
+  const s=Math.min((W-70)/Math.max(1,x1-x0),(H-46)/Math.max(1,y1-y0));
+  const ox=(W-(x1-x0)*s)/2,oy=(H-(y1-y0)*s)/2;
+  const X=v=>ox+(v-x0)*s,Y=v=>oy+(v-y0)*s;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  let h='';
+  pipes.forEach(p=>{
+    const a=pos[p.up],b=pos[p.dn];if(!a||!b)return;
+    const r=res.get(p.id),on=p.line===ui.route,sel=p.id===ui.sel;
+    const xa=X(a[0]),ya=Y(a[1]),xb=X(b[0]),yb=Y(b[1]),mx=(xa+xb)/2,my=(ya+yb)/2;
+    const ang=Math.atan2(yb-ya,xb-xa),ax=Math.cos(ang),ay=Math.sin(ang);
+    h+=`<g data-pid="${esc(p.id)}" style="cursor:pointer">`+
+      (sel?`<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="var(--accent)" stroke-width="9" stroke-opacity=".3" stroke-linecap="round"/>`:'')+
+      `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="var(--${stCls(r.st)})" stroke-width="${on?4:2.2}" stroke-linecap="round"/>`+
+      `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="transparent" stroke-width="16"/>`+
+      `<path d="M${mx+ax*5} ${my+ay*5} L${mx-ax*3-ay*4} ${my-ay*3+ax*4} L${mx-ax*3+ay*4} ${my-ay*3-ax*4}Z" fill="var(--${stCls(r.st)})"/>`+
+      `<text x="${mx-ay*12}" y="${my+ax*12+3}" font-size="9.5" text-anchor="middle" fill="var(--muted)">${esc(p.id)}</text></g>`;
+  });
+  const nodes=new Set();pipes.forEach(p=>{nodes.add(p.up);nodes.add(p.dn);});
+  nodes.forEach(n=>{const q=pos[n];if(!q)return;
+    h+=`<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="3.6" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.2"/>`+
+       `<text x="${X(q[0])+5}" y="${Y(q[1])-6}" font-size="9.5" fill="var(--ink)">${esc(n)}</text>`;});
+  svg.innerHTML=h;
+}
+$('#plan').addEventListener('click',e=>{const g=e.target.closest('[data-pid]');if(!g)return;const p=P(g.dataset.pid);
+  if(p.line!==ui.route)selectRoute(p.line,p.id);else{ui.sel=p.id;ui.handle={pid:p.id,end:'dn'};render();}});
+
+/* ---------- 종단 ---------- */
+const PROF={L0:120,R0:26,top:30,PH:290,row:19};
+function routeGeom(){
+  const ch=routes.get(ui.route);const cs=[0];ch.forEach(p=>cs.push(cs[cs.length-1]+p.L));
+  const nodes=[ch[0].up,...ch.map(p=>p.dn)];
+  return{ch,cs,nodes,total:cs[cs.length-1]};
+}
+function renderProfile(){
+  const wrap=$('#profWrap'),svg=$('#prof');
+  const g=routeGeom(),{L0,R0,top,PH,row}=PROF;
+  const W=Math.max(760,wrap.clientWidth),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정'];
+  const bandTop=top+PH+22,H=bandTop+bandRows.length*row+6;
+  svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  if(!ui.yFrame||!drag){
+    let lo=Infinity,hi=-Infinity;
+    g.ch.forEach(p=>{lo=Math.min(lo,p.invUp,p.invDn);hi=Math.max(hi,p.ghUp,p.ghDn);});
+    pipes.forEach(p=>{if(g.nodes.includes(p.dn)&&p.line!==ui.route)lo=Math.min(lo,p.invDn);});
+    const pad=(hi-lo)*0.12+0.2;ui.yFrame={lo:lo-pad,hi:hi+pad*0.9};
+  }
+  const {lo,hi}=ui.yFrame,ppm=PH/(hi-lo);
+  const X=c=>L0+20+c*(W-L0-20-R0)/g.total,Y=z=>top+(hi-z)*ppm;
+  ui.ppm=ppm;
+  let h='';
+  // 표고 격자
+  const step=(hi-lo)>8?1:(hi-lo)>3?0.5:0.25;
+  for(let z=Math.ceil(lo/step)*step;z<=hi;z+=step){const y=Y(z);
+    h+=`<line x1="${L0}" x2="${W-R0}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L0-6}" y="${y+3.5}" font-size="10" text-anchor="end" fill="var(--muted)">${z.toFixed(2)}</text>`;}
+  h+=`<text x="${L0-6}" y="${top-12}" font-size="10" text-anchor="end" fill="var(--muted)">EL. (m)</text>`;
+  // 지반
+  let gl=`M${X(0)} ${Y(g.ch[0].ghUp)}`;g.ch.forEach((p,i)=>{gl+=` L${X(g.cs[i])} ${Y(p.ghUp)} L${X(g.cs[i+1])} ${Y(p.ghDn)}`;});
+  h+=`<path d="${gl} L${X(g.total)} ${top+PH} L${X(0)} ${top+PH}Z" fill="var(--soil)" opacity=".75"/>`;
+  h+=`<path d="${gl}" fill="none" stroke="var(--ground)" stroke-width="2"/>`;
+  // 맨홀
+  const MW=10;
+  g.nodes.forEach((n,i)=>{
+    const x=X(g.cs[i]);
+    const gh=i<g.ch.length?g.ch[i].ghUp:g.ch[i-1].ghDn;
+    let low=Infinity;pipes.forEach(p=>{if(p.up===n)low=Math.min(low,p.invUp);if(p.dn===n)low=Math.min(low,p.invDn);});
+    h+=`<rect x="${x-MW/2}" y="${Y(gh)}" width="${MW}" height="${Y(low-0.12)-Y(gh)}" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.1"/>`+
+       `<text x="${x}" y="${Y(gh)-7}" font-size="10.5" font-weight="600" text-anchor="middle" fill="var(--ink)">${esc(n)}</text>`;
+  });
+  // 관로 + 수면 + 라벨
+  g.ch.forEach((p,i)=>{
+    const r=res.get(p.id),D=p.D/1000,x1=X(g.cs[i])+MW/2,x2=X(g.cs[i+1])-MW/2,sel=p.id===ui.sel;
+    const c=`var(--${stCls(r.st)})`;
+    h+=`<polygon class="pb" data-pid="${esc(p.id)}" data-end="body" points="${x1},${Y(p.invUp)} ${x2},${Y(p.invDn)} ${x2},${Y(p.invDn+D)} ${x1},${Y(p.invUp+D)}" fill="var(--pipe-fill)" stroke="${sel?'var(--accent)':'var(--pipe)'}" stroke-width="${sel?2:1.2}"/>`;
+    const hh=Math.min(r.h,D);
+    if(hh>0)h+=`<polygon points="${x1},${Y(p.invUp)} ${x2},${Y(p.invDn)} ${x2},${Y(p.invDn+hh)} ${x1},${Y(p.invUp+hh)}" fill="var(--sewage-fill)" opacity=".85" pointer-events="none"/>`+
+      `<line x1="${x1}" y1="${Y(p.invUp+hh)}" x2="${x2}" y2="${Y(p.invDn+hh)}" stroke="var(--sewage)" stroke-width="1.4" pointer-events="none"/>`;
+    const mx=(x1+x2)/2,cy=Y((p.invUp+p.invDn)/2+D);
+    const vt=`V ${r.V.toFixed(2)}`;
+    h+=`<g pointer-events="none"><rect x="${mx-30}" y="${cy-40}" width="60" height="17" rx="8.5" fill="${c}"/>`+
+       `<text x="${mx}" y="${cy-28}" font-size="11" font-weight="600" text-anchor="middle" fill="var(--panel)">${vt}</text>`+
+       `<text x="${mx}" y="${cy-9}" font-size="10" text-anchor="middle" fill="var(--ink)">D${p.D} · ${r.S.toFixed(2)}‰</text></g>`;
+  });
+  // 분기 유입 표시
+  g.nodes.forEach((n,i)=>{
+    const x=X(g.cs[i]);
+    pipes.filter(p=>p.dn===n&&p.line!==ui.route).forEach((p,k)=>{
+      const r=res.get(p.id),y=Y(p.invDn),col=r.joint?'var(--bad)':'var(--sewage)';
+      h+=`<g data-pid="${esc(p.id)}" data-branch="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${Math.max(3,p.D/1000*ppm/2)}" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="3 2"/>`+
+         `<text x="${x+9}" y="${y+16+k*12}" font-size="9.5" fill="${col}">${esc(p.line)} ${f2(p.invDn)}${r.joint?' ▲접합불량':''}</text></g>`;
+    });
+  });
+  // 핸들
+  g.ch.forEach((p,i)=>{
+    const x1=X(g.cs[i])+MW/2,x2=X(g.cs[i+1])-MW/2;
+    [['up',x1,p.invUp],['dn',x2,p.invDn]].forEach(([end,x,z])=>{
+      const on=ui.handle&&ui.handle.pid===p.id&&ui.handle.end===end;
+      h+=`<g class="h" data-pid="${esc(p.id)}" data-end="${end}"><circle cx="${x+(end==='up'?6:-6)}" cy="${Y(z)}" r="11" fill="transparent"/>`+
+         (on?`<circle cx="${x}" cy="${Y(z)}" r="9" fill="var(--accent)" opacity=".22"/>`:'')+
+         `<circle cx="${x}" cy="${Y(z)}" r="${on?5.5:4.5}" fill="${on?'var(--accent)':'var(--panel)'}" stroke="var(--accent)" stroke-width="1.6"/></g>`;
+    });
+  });
+  if(drag&&drag.moved){
+    const p=P(drag.pid),i=g.ch.indexOf(p);
+    if(i>=0){const end=drag.end==='body'?'dn':drag.end,x=end==='up'?X(g.cs[i])+MW/2:X(g.cs[i+1])-MW/2,z=end==='up'?p.invUp:p.invDn,r=res.get(p.id);
+      const txt=`INV ${f2(z)}  S ${r.S.toFixed(2)}‰  V ${r.V.toFixed(2)}`,tw=txt.length*6.4+12,tx=Math.min(Math.max(x-tw/2,L0),W-R0-tw);
+      h+=`<g pointer-events="none"><rect x="${tx}" y="${Y(z)+14}" width="${tw}" height="18" rx="4" fill="var(--ink)"/><text x="${tx+6}" y="${Y(z)+27}" font-size="10.5" fill="var(--bg)">${txt}</text></g>`;}
+  }
+  // 하단 데이터 밴드 (종단도 표)
+  h+=`<rect x="0" y="${bandTop}" width="${W-R0+6}" height="${bandRows.length*row}" fill="var(--panel2)" stroke="var(--line)"/>`;
+  bandRows.forEach((t,k)=>{const y=bandTop+k*row;
+    h+=`<line x1="0" x2="${W-R0+6}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="8" y="${y+13}" font-size="10.5" fill="var(--muted)" font-family="var(--sans)">${t}</text>`;});
+  h+=`<line x1="${L0-8}" x2="${L0-8}" y1="${bandTop}" y2="${bandTop+bandRows.length*row}" stroke="var(--line)"/>`;
+  const T=(x,k,txt,col='var(--ink)',w=400)=>`<text x="${x}" y="${bandTop+k*row+13}" font-size="10.5" text-anchor="middle" fill="${col}" font-weight="${w}">${txt}</text>`;
+  g.nodes.forEach((n,i)=>{
+    const x=X(g.cs[i]),pin=g.ch[i-1],pout=g.ch[i];
+    h+=`<line x1="${x}" x2="${x}" y1="${top+PH}" y2="${bandTop+4*row}" stroke="var(--line)" stroke-dasharray="2 3"/>`;
+    const gh=pout?pout.ghUp:pin.ghDn;
+    const covs=[];if(pin)covs.push(res.get(pin.id).covDn);if(pout)covs.push(res.get(pout.id).covUp);
+    const cv=Math.min(...covs);
+    h+=T(x,0,f2(gh))+T(x,1,pin?f2(pin.invDn):'—',pin&&res.get(pin.id).joint?'var(--bad)':'var(--ink)')+T(x,2,pout?f2(pout.invUp):'—')+T(x,3,f2(cv),cv<crit.cover?'var(--warn)':'var(--ink)',cv<crit.cover?600:400);
+  });
+  g.ch.forEach((p,i)=>{
+    const r=res.get(p.id),x=(X(g.cs[i])+X(g.cs[i+1]))/2,c=`var(--${stCls(r.st)})`;
+    const rem=r.rem[0];
+    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+T(x,8,rem,c,600);
+  });
+  svg.innerHTML=h;
+}
+
+/* 드래그 */
+const svgP=$('#prof');
+svgP.addEventListener('pointerdown',e=>{
+  const t=e.target.closest('[data-pid]');if(!t)return;
+  const pid=t.dataset.pid;
+  if(t.dataset.branch){const p=P(pid);selectRoute(p.line,pid);return;}
+  const end=t.dataset.end;
+  e.preventDefault();
+  ui.sel=pid;if(end!=='body')ui.handle={pid,end};
+  drag={pid,end,y0:e.clientY,before:snapshot(),base:JSON.parse(snapshot()),moved:false,
+        linked:e.ctrlKey?false:e.altKey?true:ui.linked,scale:svgP.getBoundingClientRect().height/svgP.height.baseVal.value};
+  svgP.setPointerCapture(e.pointerId);
+  render();
+});
+svgP.addEventListener('pointermove',e=>{
+  if(!drag)return;
+  const dy=(e.clientY-drag.y0)/drag.scale;
+  if(!drag.moved&&Math.abs(dy)<3)return;
+  drag.moved=true;
+  const delta=Math.round(-dy/ui.ppm*100)/100;
+  pipes=clone(drag.base);
+  if(delta){
+    if(drag.end==='body'){shiftEnd(drag.pid,'up',delta,drag.linked);shiftEnd(drag.pid,'dn',delta,drag.linked);}
+    else shiftEnd(drag.pid,drag.end,delta,drag.linked);
+  }
+  render();
+});
+const endDrag=()=>{if(!drag)return;const d=drag;drag=null;if(snapshot()!==d.before)commit(d.before);render();};
+svgP.addEventListener('pointerup',endDrag);svgP.addEventListener('pointercancel',endDrag);
+
+/* 키보드 */
+document.addEventListener('keydown',e=>{
+  const tag=(e.target.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='textarea'||tag==='select')return;
+  const mod=e.ctrlKey||e.metaKey;
+  if(mod&&(e.key==='z'||e.key==='Z')&&!e.shiftKey){e.preventDefault();doUndo();return;}
+  if(mod&&(e.key==='y'||((e.key==='z'||e.key==='Z')&&e.shiftKey))){e.preventDefault();doRedo();return;}
+  if(!ui.handle)return;
+  const up=e.key==='ArrowUp'||e.key==='+'||e.key==='=',dn=e.key==='ArrowDown'||e.key==='-'||e.key==='_';
+  if(up||dn){
+    e.preventDefault();
+    const step=(e.shiftKey?0.1:0.01)*(up?1:-1),linked=e.ctrlKey||e.metaKey?false:e.altKey?true:ui.linked;
+    edit(()=>shiftEnd(ui.handle.pid,ui.handle.end,step,linked));return;
+  }
+  if(e.key==='ArrowLeft'||e.key==='ArrowRight'){
+    e.preventDefault();
+    const ch=routes.get(ui.route),list=[];ch.forEach(p=>{list.push({pid:p.id,end:'up'});list.push({pid:p.id,end:'dn'});});
+    let i=list.findIndex(h=>h.pid===ui.handle.pid&&h.end===ui.handle.end);
+    i=Math.max(0,Math.min(list.length-1,i+(e.key==='ArrowRight'?1:-1)));
+    ui.handle=list[i];ui.sel=list[i].pid;render();
+  }
+});
+function doUndo(){if(!undo.length)return;redo.push(snapshot());pipes=JSON.parse(undo.pop());render();}
+function doRedo(){if(!redo.length)return;undo.push(snapshot());pipes=JSON.parse(redo.pop());render();}
+
+/* ---------- 단면 ---------- */
+function renderSection(){
+  const p=P(ui.sel),r=res.get(p.id);
+  $('#secId').textContent=`${p.id}  ${p.up} → ${p.dn}`;
+  const cx=95,cy=95,R=72,hD=Math.min(1,r.hD),wy=cy+R-2*R*hD;
+  const c=`var(--${stCls(r.st)})`;
+  let s=`<defs><clipPath id="cc"><circle cx="${cx}" cy="${cy}" r="${R}"/></clipPath></defs>`+
+    `<circle cx="${cx}" cy="${cy}" r="${R+7}" fill="var(--pipe-fill)" stroke="var(--pipe)"/>`+
+    `<circle cx="${cx}" cy="${cy}" r="${R}" fill="var(--panel)" stroke="var(--pipe)"/>`+
+    `<rect x="${cx-R}" y="${wy}" width="${2*R}" height="${cy+R-wy}" fill="${r.sur?'var(--bad)':'var(--sewage-fill)'}" opacity=".85" clip-path="url(#cc)"/>`+
+    `<line x1="${cx-R-14}" x2="${cx+R+14}" y1="${wy}" y2="${wy}" stroke="var(--sewage)" stroke-width="1.4" stroke-dasharray="4 3"/>`+
+    `<line x1="${cx+R+22}" x2="${cx+R+22}" y1="${cy+R}" y2="${wy}" stroke="var(--ink)"/>`+
+    `<text x="${cx+R+28}" y="${(cy+R+wy)/2+4}" font-size="11" fill="var(--ink)">h ${(r.h*1000).toFixed(0)}</text>`+
+    `<text x="${cx+R+28}" y="${(cy+R+wy)/2+18}" font-size="11" fill="var(--muted)">h/D ${(r.hD*100).toFixed(0)}%</text>`+
+    `<text x="${cx}" y="${cy-R/2+4}" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">D ${p.D}${p.nb>1?' ×'+p.nb:''}</text>`+
+    `<text x="${cx}" y="${cy-R/2+20}" font-size="11" text-anchor="middle" fill="${c}" font-weight="600">V ${r.V.toFixed(2)} m/s</text>`;
+  $('#sec').innerHTML=s;
+  const kv=[
+    ['누가인구',Math.round(r.pop).toLocaleString()+' 인'],
+    ['설계유량 Q',f4(r.Q)+' m³/s'],
+    ['만관유량 Qfull',f4(r.Qfull)+' m³/s'],
+    ['허용유량 (여유율 '+Math.round(r.margin*100)+'%)',f4(r.Qallow)+' m³/s'],
+    ['사용률',isFinite(r.use)?(r.use*100).toFixed(0)+' %':'—'],
+    ['경사',r.S.toFixed(2)+' ‰'],
+    ['만관유속',r.Vfull.toFixed(2)+' m/s'],
+    ['실유속',r.V.toFixed(2)+' m/s'],
+    ['토피 상/하',f2(r.covUp)+' / '+f2(r.covDn)+' m'],
+    ['판정',r.rem.map(x=>`<span class="remark ${stCls(r.st)}">${esc(x)}</span>`).join(' ')],
+  ];
+  $('#secKv').innerHTML=kv.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+}
+$('#bFitV').onclick=()=>{const p=P(ui.sel),r=res.get(p.id);
+  const S=slopeForV(p,r.Q,crit.vmin+0.005);
+  const target=Math.floor((p.invUp-S*p.L)*100)/100;
+  edit(()=>shiftEnd(p.id,'dn',target-p.invDn,ui.linked));toast(`${p.id} 하류관저 ${f2(target)} (S ${((p.invUp-target)/p.L*1000).toFixed(2)}‰)`);};
+$('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;let pick=DIAS[DIAS.length-1];
+  for(const d of DIAS){p.D=d;const r=compute(pipes,crit).get(p.id);if(r.use<=1){pick=d;break;}}
+  p.D=orig;if(pick===orig){toast('현재 관경이 최소 적합 관경입니다');return;}
+  edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
+const stepD=k=>{const p=P(ui.sel);const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
+$('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
+
+/* ---------- 표 ---------- */
+function renderTable(){
+  const list=ui.tableAll?[...routes.values()].flat():routes.get(ui.route);
+  let h=`<thead><tr><th class="l">관로</th><th class="l">노선</th><th class="l">상류→하류</th><th>연장</th><th>관경</th><th>경사‰</th><th>INV 상</th><th>INV 하</th><th>GH 상</th><th>GH 하</th><th>누가인구</th><th>Q m³/s</th><th>Qfull</th><th>V m/s</th><th>h/D</th><th>사용률</th><th>토피 min</th><th class="l">판정</th></tr></thead><tbody>`;
+  list.forEach(p=>{const r=res.get(p.id);
+    const inp=(k,v)=>`<input data-k="${k}" data-pid="${esc(p.id)}" value="${v}" inputmode="decimal" aria-label="${k}">`;
+    h+=`<tr data-pid="${esc(p.id)}" class="${p.id===ui.sel?'sel':''}"><td class="l">${esc(p.id)}</td><td class="l">${esc(p.line)}</td><td class="l">${esc(p.up)}→${esc(p.dn)}</td><td>${p.L.toFixed(1)}</td>`+
+      `<td><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`+
+      `<td>${inp('S',r.S.toFixed(2))}</td><td>${inp('invUp',f2(p.invUp))}</td><td>${inp('invDn',f2(p.invDn))}</td><td>${inp('ghUp',f2(p.ghUp))}</td><td>${inp('ghDn',f2(p.ghDn))}</td>`+
+      `<td>${Math.round(r.pop).toLocaleString()}</td><td>${f4(r.Q)}</td><td>${f4(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.use)?(r.use*100).toFixed(0)+'%':'—'}</td><td>${f2(Math.min(r.covUp,r.covDn))}</td>`+
+      `<td class="l"><span class="remark ${stCls(r.st)}">${r.rem.map(esc).join(' ')}</span></td></tr>`;});
+  $('#tbl').innerHTML=h+'</tbody>';
+}
+$('#tbl').addEventListener('change',e=>{
+  const el=e.target,k=el.dataset.k,p=P(el.dataset.pid);if(!k||!p)return;
+  const v=parseFloat(el.value);
+  if(!isFinite(v)){toast('숫자를 입력하세요. 원래 값으로 되돌렸습니다');render();return;}
+  edit(()=>{
+    if(k==='D')p.D=v;
+    else if(k==='S'){const nd=r3(p.invUp-v/1000*p.L);shiftEnd(p.id,'dn',nd-p.invDn,ui.linked);}
+    else if(k==='invUp'||k==='invDn')shiftEnd(p.id,k==='invUp'?'up':'dn',r3(v-p[k]),ui.linked);
+    else p[k]=v;
+  });
+});
+$('#tbl').addEventListener('click',e=>{if(e.target.closest('input,select'))return;const tr=e.target.closest('tr[data-pid]');if(!tr)return;const p=P(tr.dataset.pid);
+  if(p.line!==ui.route)selectRoute(p.line,p.id);else{ui.sel=p.id;ui.handle={pid:p.id,end:'dn'};render();}});
+$('#tRoute').onclick=()=>{ui.tableAll=false;$('#tRoute').classList.add('on');$('#tAll').classList.remove('on');render();};
+$('#tAll').onclick=()=>{ui.tableAll=true;$('#tAll').classList.add('on');$('#tRoute').classList.remove('on');render();};
+
+/* ---------- 상단 버튼 ---------- */
+const setMode=l=>{ui.linked=l;$('#mLinked').classList.toggle('on',l);$('#mSingle').classList.toggle('on',!l);};
+$('#mLinked').onclick=()=>setMode(true);$('#mSingle').onclick=()=>setMode(false);
+$('#bUndo').onclick=doUndo;$('#bRedo').onclick=doRedo;
+$('#bReset').onclick=()=>edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});
+['cVmin','cVmax','cCover'].forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
+  crit[{cVmin:'vmin',cVmax:'vmax',cCover:'cover'}[id]]=v;render();}));
+
+function copyText(txt,label){
+  const fallback=()=>{$('#dlg').hidden=false;$('#pasteBox').value=txt;$('#pasteBox').select();$('#pasteErr').textContent='클립보드 접근이 막혀 있어 아래에 표시했습니다. Ctrl+C로 복사하세요.';};
+  try{navigator.clipboard.writeText(txt).then(()=>toast(label+' 복사됨 · 엑셀에 붙여넣기'),fallback);}catch(_){fallback();}
+}
+$('#bCopyIn').onclick=()=>copyText([HEAD.join('\t'),...[...routes.values()].flat().map(p=>COLS.map(k=>p[k]).join('\t'))].join('\n'),'입력양식');
+$('#bCopyOut').onclick=()=>{
+  const hd=['노선명','관로번호','상류','하류','연장','관경','경사(‰)','상류관저','하류관저','상류지반','하류지반','누가인구','Q(m3/s)','Qfull(m3/s)','Qallow(m3/s)','V(m/s)','h/D','사용률(%)','토피min','판정'];
+  const rows=[...routes.values()].flat().map(p=>{const r=res.get(p.id);return[p.line,p.id,p.up,p.dn,p.L,p.D,r.S.toFixed(2),f2(p.invUp),f2(p.invDn),f2(p.ghUp),f2(p.ghDn),Math.round(r.pop),f4(r.Q),f4(r.Qfull),f4(r.Qallow),r.V.toFixed(3),r.hD.toFixed(3),isFinite(r.use)?(r.use*100).toFixed(1):'',f2(Math.min(r.covUp,r.covDn)),r.rem.join(' ')].join('\t');});
+  copyText([hd.join('\t'),...rows].join('\n'),'계산결과');
+};
+$('#bPaste').onclick=()=>{$('#dlg').hidden=false;$('#pasteErr').textContent='';$('#pasteBox').focus();};
+$('#bClose').onclick=()=>{$('#dlg').hidden=true;};
+$('#bApply').onclick=()=>{
+  const {pipes:np,errs}=parseTSV($('#pasteBox').value);
+  if(errs.length){$('#pasteErr').textContent=errs.join('\n');return;}
+  edit(()=>{pipes=np;ui.yFrame=null;});
+  routes=routesOf(pipes);selectRoute(routes.keys().next().value);
+  $('#dlg').hidden=true;toast(`관로 ${np.length}개를 불러왔습니다`);
+};
+
+new ResizeObserver(()=>{if(!drag){renderPlan();renderProfile();}}).observe($('#profWrap'));
+render();
+</script>
