@@ -460,23 +460,45 @@ function renderPlan(){
   const ox=(W-(x1-x0)*s)/2,oy=(H-(y1-y0)*s)/2;
   const X=v=>ox+(v-x0)*s,Y=v=>oy+(v-y0)*s;
   svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
+  const ch=routes.get(ui.route),inRoute=new Set(ch.map(p=>p.id));
+  const rangeIds=new Set(ui.range?ch.slice(ui.range.i0,ui.range.i1).map(p=>p.id):[]);
+  const seg=p=>{const a=pos[p.up],b=pos[p.dn];return a&&b?[X(a[0]),Y(a[1]),X(b[0]),Y(b[1])]:null;};
+  const ln=(c,st)=>`<line x1="${c[0]}" y1="${c[1]}" x2="${c[2]}" y2="${c[3]}" ${st} stroke-linecap="round"/>`;
   let h='';
-  pipes.forEach(p=>{
-    const a=pos[p.up],b=pos[p.dn];if(!a||!b)return;
-    const r=res.get(p.id),on=p.line===ui.route,sel=p.id===ui.sel;
-    const xa=X(a[0]),ya=Y(a[1]),xb=X(b[0]),yb=Y(b[1]),mx=(xa+xb)/2,my=(ya+yb)/2;
-    const ang=Math.atan2(yb-ya,xb-xa),ax=Math.cos(ang),ay=Math.sin(ang);
-    h+=`<g data-pid="${esc(p.id)}" style="cursor:pointer">`+
-      (sel?`<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="var(--accent)" stroke-width="9" stroke-opacity=".3" stroke-linecap="round"/>`:'')+
-      `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="var(--${stCls(r.st)})" stroke-width="${on?4:2.2}" stroke-linecap="round"/>`+
-      `<line x1="${xa}" y1="${ya}" x2="${xb}" y2="${yb}" stroke="transparent" stroke-width="16"/>`+
-      `<path d="M${mx+ax*5} ${my+ay*5} L${mx-ax*3-ay*4} ${my-ay*3+ax*4} L${mx-ax*3+ay*4} ${my-ay*3-ax*4}Z" fill="var(--${stCls(r.st)})"/>`+
-      `<text x="${mx-ay*12}" y="${my+ax*12+3}" font-size="9.5" text-anchor="middle" fill="var(--muted)">${esc(p.id)}</text></g>`;
-  });
+  // 1) 현재 노선 바탕 강조 (종단에 띄운 노선)
+  ch.forEach(p=>{const c=seg(p);if(c)h+=ln(c,`stroke="var(--accent)" stroke-width="14" stroke-opacity=".18" pointer-events="none"`);});
+  // 2) 관로: 다른 노선은 흐리게, 현재 노선은 굵게
+  const drawPipe=p=>{
+    const c=seg(p);if(!c)return;
+    const r=res.get(p.id),on=inRoute.has(p.id),sel=p.id===ui.sel;
+    const [xa,ya,xb,yb]=c,mx=(xa+xb)/2,my=(ya+yb)/2;
+    const ang=Math.atan2(yb-ya,xb-xa),ax=Math.cos(ang),ay=Math.sin(ang),col=`var(--${stCls(r.st)})`;
+    h+=`<g data-pid="${esc(p.id)}" style="cursor:pointer" opacity="${on?1:.38}">`+
+      (sel?ln(c,`stroke="var(--accent)" stroke-width="10" stroke-opacity=".45"`):'')+
+      ln(c,`stroke="${col}" stroke-width="${on?4.5:2}"`)+
+      (rangeIds.has(p.id)?ln(c,`stroke="var(--panel)" stroke-width="1.6" stroke-dasharray="4 4"`):'')+
+      ln(c,`stroke="transparent" stroke-width="16"`)+
+      `<path d="M${mx+ax*5} ${my+ay*5} L${mx-ax*3-ay*4} ${my-ay*3+ax*4} L${mx-ax*3+ay*4} ${my-ay*3-ax*4}Z" fill="${col}"/>`+
+      `<text x="${mx-ay*12}" y="${my+ax*12+3}" font-size="9.5" text-anchor="middle" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}">${esc(p.id)}</text></g>`;
+  };
+  pipes.filter(p=>!inRoute.has(p.id)).forEach(drawPipe);
+  ch.forEach(drawPipe);
+  // 3) 맨홀
+  const routeNodes=new Set();ch.forEach(p=>{routeNodes.add(p.up);routeNodes.add(p.dn);});
   const nodes=new Set();pipes.forEach(p=>{nodes.add(p.up);nodes.add(p.dn);});
-  nodes.forEach(n=>{const q=pos[n];if(!q)return;
-    h+=`<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="3.6" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.2"/>`+
-       `<text x="${X(q[0])+5}" y="${Y(q[1])-6}" font-size="9.5" fill="var(--ink)">${esc(n)}</text>`;});
+  nodes.forEach(n=>{const q=pos[n];if(!q)return;const on=routeNodes.has(n);
+    h+=`<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="${on?4.2:3.2}" fill="var(--panel)" stroke="${on?'var(--accent)':'var(--muted)'}" stroke-width="${on?1.8:1}"/>`+
+       `<text x="${X(q[0])+5}" y="${Y(q[1])-6}" font-size="9.5" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}" opacity="${on?1:.7}">${esc(n)}</text>`;});
+  // 4) 노선명 표지 (시점 맨홀 옆)
+  const st=pos[ch[0].up];
+  const en=pos[ch[0].dn];
+  if(st&&en){const tw=ui.route.length*11+16,dx=X(en[0])-X(st[0]),dy=Y(en[1])-Y(st[1]),d=Math.hypot(dx,dy)||1,px=dy/d,py=-dx/d;
+    // 관망 중심에서 먼 쪽으로 표지를 둔다
+    const gx=xs.reduce((a,v)=>a+X(v),0)/xs.length,gy=ys.reduce((a,v)=>a+Y(v),0)/ys.length;
+    const sg=(X(st[0])-gx)*px+(Y(st[1])-gy)*py< -1?-1:1;
+    const off=20+Math.abs(px)*tw/2,cx=X(st[0])+sg*px*off,cy=Y(st[1])+sg*py*off;
+    const tx=Math.min(Math.max(cx-tw/2,2),W-tw-2),ty=Math.min(Math.max(cy-8,2),H-18);
+    h+=`<g pointer-events="none"><rect x="${tx}" y="${ty}" width="${tw}" height="16" rx="8" fill="var(--accent)"/><text x="${tx+tw/2}" y="${ty+11.5}" font-size="10" font-weight="600" text-anchor="middle" fill="var(--panel)" font-family="var(--sans)">${esc(ui.route)}</text></g>`;}
   svg.innerHTML=h;
 }
 $('#plan').addEventListener('click',e=>{const g=e.target.closest('[data-pid]');if(!g)return;const p=P(g.dataset.pid);
