@@ -87,6 +87,8 @@ td input:hover,td select:hover{border-color:var(--line)}
 td input:focus{border-color:var(--accent);background:var(--panel2);outline:none}
 td select{width:auto}
 .tblwrap{overflow:auto;max-height:420px}
+.filebtn{display:inline-flex;align-items:center;background:var(--accent);color:var(--panel);border:1px solid var(--accent);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;touch-action:manipulation}
+.filebtn:focus-within,.filebtn:hover{filter:brightness(1.08)}
 .dlg{background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
 .dlg textarea{width:100%;min-height:170px;font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:8px;white-space:pre;overflow:auto}
 .err{color:var(--bad);font-size:12.5px;font-family:var(--mono);white-space:pre-wrap}
@@ -147,15 +149,17 @@ button,.tab{touch-action:manipulation}
     </div>
     <div class="sp"></div>
     <div class="btns">
-      <button id="bPaste">엑셀 붙여넣기</button>
-      <button id="bCopyIn">입력양식 복사</button>
+      <label class="filebtn" for="fileIn">PipeTools 엑셀 열기</label><input id="fileIn" type="file" accept=".xlsx,.xlsm,.xls" hidden>
+      <button id="bPaste">시트 붙여넣기</button>
+      <button id="bCopyProf" title="현재 노선의 종단파일 시트 (PipeTools 형식)">종단파일 복사</button>
+      <button id="bCopyIn" title="PipeTools 수리계산 시트 A~AG">수리시트 복사</button>
       <button id="bCopyOut">계산결과 복사</button>
     </div>
   </div>
 
   <div class="dlg" id="dlg" hidden>
-    <div class="bar"><strong>엑셀에서 붙여넣기</strong><span class="sub">열 순서 A~V: 노선명 · 관로번호 · 상류맨홀 · 하류맨홀 · 연장 · 배수면적 · 폭 · 관경 · 련수 · 상류지반고 · 하류지반고 · 상류관저고 · 하류관저고 · 조도계수 · 유출계수 · 외부유입 · 유입시간 · 비고 · 인구밀도 · 오수단위 · 지하수단위 · P.F</span></div>
-    <textarea id="pasteBox" spellcheck="false" placeholder="엑셀에서 관로 행을 선택해 복사(Ctrl+C)한 뒤 여기에 붙여넣기(Ctrl+V). 제목 행은 자동으로 건너뜁니다."></textarea>
+    <div class="bar"><strong>시트 붙여넣기</strong><span class="sub">PipeTools 엑셀에서 <b>종단파일</b> 시트나 <b>수리계산</b> 시트(PipeTools(노선명))를 A1부터 통째로 복사해 붙여넣으세요. 제목 행으로 어느 시트인지 알아봅니다. 종단파일을 붙이면 지금 관로와 맨홀 좌표가 같은 곳의 유량 자료를 이어받습니다.</span></div>
+    <textarea id="pasteBox" spellcheck="false" placeholder="Ctrl+A로 시트 전체 선택 → Ctrl+C → 여기에 Ctrl+V"></textarea>
     <div class="err" id="pasteErr"></div>
     <div class="btns"><button id="bApply" class="on">적용</button><button id="bClose">닫기</button></div>
   </div>
@@ -163,7 +167,7 @@ button,.tab{touch-action:manipulation}
   <div class="grid">
     <div class="col">
       <div class="card plan-card">
-        <div class="card-h"><h2>관망 평면 (모식도)</h2><div class="sp"></div>
+        <div class="card-h"><h2 id="planTitle">관망 평면 (모식도)</h2><div class="sp"></div>
           <div class="legend"><span><i style="background:var(--good)"></i>적합</span><span><i style="background:var(--warn)"></i>유속·토피 주의</span><span><i style="background:var(--bad)"></i>용량·역구배·접합 불량</span></div>
         </div>
         <svg id="plan" aria-label="관망 평면 모식도"></svg>
@@ -174,6 +178,7 @@ button,.tab{touch-action:manipulation}
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
           <button id="bRange" title="두 맨홀 사이 관저를 한 경사로 일직선 정리">구간 일직선</button>
+          <div class="seg" role="group" aria-label="가로 축척"><button id="zOut" aria-label="축소">－</button><button id="zFit" title="노선 전체를 화면에">전체</button><button id="zIn" aria-label="확대">＋</button></div>
           <div class="sp"></div>
           <div class="hint touch-only">관저 점을 눌러 선택 → 위아래로 끌거나 하단 버튼(길게 누르면 연속)으로 조정 · 좌우로 밀면 종단 스크롤</div>
           <div class="hint kbd-only">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동</div>
@@ -209,9 +214,11 @@ button,.tab{touch-action:manipulation}
         <div class="crit">
           <label for="cVmin">최소유속 (m/s)</label><input id="cVmin" type="number" step="0.05" value="0.6">
           <label for="cVmax">최대유속 (m/s)</label><input id="cVmax" type="number" step="0.1" value="3.0">
+          <label for="cVlow">유지관리 하한 유속 (m/s)</label><input id="cVlow" type="number" step="0.05" value="0.3">
           <label for="cCover">최소토피 (m)</label><input id="cCover" type="number" step="0.1" value="1.0">
+          <label for="cClear">지장물 최소이격 (m)</label><input id="cClear" type="number" step="0.05" value="0.3">
         </div>
-        <p class="hint" style="margin:10px 0 0">설계유량 = (오수단위 × P.F + 지하수단위) × 누가인구 / 86,400,000 [m³/s]. 여유율은 관경 600 이하 100%, 700~1500 50%, 1650 이상 25% (하수도시설기준 오수관거). 유속은 계획시간최대오수량의 등류 실유속으로 판정합니다.</p>
+        <p class="hint" style="margin:10px 0 0">설계유량 = (오수단위 × P.F + 지하수단위) × 누가인구 / 86,400,000 [m³/s]. 여유율은 관경 600 이하 100%, 700~1500 50%, 1650 이상 25% (하수도시설기준 오수관거). 유속은 계획시간최대오수량의 등류 실유속으로 판정하며, 최소유속 미만은 유지관리(주의), 유지관리 하한 미만은 불량으로 봅니다 (PipeTools 판정과 같은 구분). 토피는 맨홀뿐 아니라 종단파일의 모든 측점에서 검토합니다.</p>
       </div>
     </div>
   </div>
@@ -238,11 +245,13 @@ button,.tab{touch-action:manipulation}
 </div>
 <div class="toast" id="toast" role="status"></div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script id="engine">
 /* ---------- 계산 엔진 (UI 독립) ---------- */
 const DIAS=[200,250,300,350,400,450,500,600,700,800,900,1000,1100,1200,1350,1500,1650,1800];
-const COLS=['line','id','up','dn','L','area','W','D','nb','ghUp','ghDn','invUp','invDn','n','C','ext','tin','note','dens','won','gwon','pf'];
-const HEAD=['노선명','관로번호','상류맨홀','하류맨홀','연장','배수면적','폭','관경','련수','상류지반고','하류지반고','상류관저고','하류관저고','조도계수','유출계수','외부유입','유입시간','비고','인구밀도','오수단위','지하수단위','P.F'];
+// PipeTools 수리계산 시트 A~AG 열 순서
+const COLS=['line','id','up','dn','L','area','W','D','nb','ghUp','ghDn','invUp','invDn','n','C','ext','tin','note','dens','won','gwon','pf','x1','y1','x2','y2','sect','ptype','obsStr','mhType','drop','vertex','layer'];
+const HEAD=['노 선 명','관 번 호','상류맨홀','하류맨홀','관 연 장','각선면적','폭','높이','련','상류지반','하류지반','상류관저','하류관저','조도계수','유출계수','유입유량','유입시간','비    고','인구밀도','오수단위','지하단위','P.F','X1','Y1','X2','Y2','구간','관종','지장물','맨홀','단차','vertex','레이어'];
 // 가상 예제 데이터 (실제 현장 아님)
 const SAMPLE=[
  ['본선','P-01','MH1','MH2',45,3.2,0,200,1,52.40,52.05,50.82,50.42,0.013,0,0,0,'',160,300,30,1.5],
@@ -261,7 +270,7 @@ const SAMPLE=[
  ['지선2-1','C-01','MC1','MC2',36,2.2,0,200,1,52.30,51.90,50.95,50.55,0.013,0,0,0,'',180,300,30,1.5],
  ['지선2-1','C-02','MC2','MB2',30,1.6,0,200,1,51.90,51.30,50.53,50.10,0.013,0,0,0,'',180,300,30,1.5],
 ];
-function rowToPipe(r){const p={};COLS.forEach((k,i)=>p[k]=r[i]);return p;}
+function rowToPipe(r){const p={};COLS.forEach((k,i)=>p[k]=r[i]===undefined?'':r[i]);return p;}
 const r3=v=>Math.round(v*1000)/1000;
 const marginFor=D=>D<=600?1.0:D<=1500?0.5:0.25;
 
@@ -326,12 +335,21 @@ function compute(pipes,crit){
     if(adverse){rem.push('Adverse Slope');bump(2);}
     else{
       if(use>1){rem.push('NG_'+Math.round(use*100)+'%');bump(2);}
-      if(u.V<crit.vmin){rem.push('LESS'+u.V.toFixed(2));bump(1);}
+      if(u.V<crit.vmin){rem.push('LESS'+u.V.toFixed(2));bump(u.V<(crit.vlow||0)?2:1);}
       if(u.V>crit.vmax){rem.push('UPPR'+u.V.toFixed(2));bump(1);}
     }
-    const cmin=Math.min(covUp,covDn);
+    const zAt=c=>p.invUp+(p.invDn-p.invUp)*c/p.L;
+    let cmin=Math.min(covUp,covDn);
+    (p.st||[]).forEach(t=>{if(isFinite(t.g))cmin=Math.min(cmin,t.g-zAt(t.c)-D);});
+    // 지장물 이격: 관 외면과 지장물 사이 연직 거리
+    const obsHits=[];
+    (p.obs||[]).forEach(o=>{
+      const z=zAt(Math.max(0,Math.min(p.L,o.off))),top=o.inv+o.h;
+      const gap=top<=z?z-top:o.inv>=z+D?o.inv-(z+D):-Math.min(top-z,z+D-o.inv);
+      if(gap<(crit.clear??0.3)){obsHits.push({name:o.name,gap});rem.push('OBS'+gap.toFixed(2)+'('+o.name+')');bump(gap<0?2:1);}
+    });
     if(cmin<crit.cover-0.0005){rem.push('COVER'+cmin.toFixed(2));bump(1);}
-    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null});
+    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits});
   });
   // 맨홀 접합 검토: 유입관 하류관저가 유출관 상류관저보다 낮으면 역류
   const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
@@ -371,6 +389,167 @@ function parseTSV(text){
   if(!pipes.length)errs.push('관로 행을 찾지 못함 (5번째 열 "연장"이 숫자인 행만 읽습니다)');
   return{pipes,errs};
 }
+
+/* ---------- PipeTools 호환 (종단파일 · 수리계산 시트) ---------- */
+// 시트는 2차원 배열(행×열, 0부터)로 다룬다. 읽지 않는 열도 raw 로 보관해 내보낼 때 그대로 돌려준다.
+const PT={};
+PT.norm=v=>String(v??'').replace(/\s+/g,'');
+PT.num=v=>{const x=typeof v==='number'?v:parseFloat(String(v??'').replace(/,/g,''));return isFinite(x)?x:NaN;};
+PT.tsvRows=text=>text.replace(/\r/g,'').replace(/\n+$/,'').split('\n').map(l=>l.split('\t'));
+PT.findRow=(rows,pred,lim=12)=>{for(let i=0;i<Math.min(rows.length,lim);i++)if(pred((rows[i]||[]).map(PT.norm)))return i;return -1;};
+PT.kind=rows=>{
+  if(PT.findRow(rows,r=>r.includes('누가거리')&&r.includes('관저고'))>=0)return'profile';
+  if(PT.findRow(rows,r=>r.includes('관번호')&&r.includes('상류맨홀'))>=0)return'hyd';
+  return null;
+};
+// 수리계산 시트 (TYPE 옵션 + 3행 제목 + 관로 1행 1개)
+PT.parseHyd=rows=>{
+  const h=PT.findRow(rows,r=>r.includes('관번호')&&r.includes('상류맨홀'));
+  const errs=[],pipes=[],ids=new Set();let nPrev=0;
+  for(let i=h+1;i<rows.length;i++){
+    const c=rows[i]||[];if(!PT.norm(c[1]))continue;
+    const num=k=>{const v=PT.num(c[k]);return isFinite(v)?v:0;};
+    const p=rowToPipe(c.map(v=>v??''));
+    ['L','area','W','D','nb','ghUp','ghDn','invUp','invDn','n','C','ext','tin','dens','won','gwon','pf','x1','y1','x2','y2'].forEach(k=>p[k]=num(COLS.indexOf(k)));
+    ['line','id','up','dn','note','sect','ptype','obsStr','mhType','drop','vertex','layer'].forEach(k=>p[k]=String(c[COLS.indexOf(k)]??'').trim());
+    // PipeTools: 조도계수 빈칸은 윗행 값을 이어 씀
+    if(p.n>0)nPrev=p.n;else p.n=nPrev||0.013;
+    p.nb=p.nb||1;p.pf=p.pf||1;
+    p.obs=PT.parseObsStr(p.obsStr);
+    p.raw=c.slice();p.rawRow=i;
+    const at=`${i+1}행`;
+    if(ids.has(p.id))errs.push(`${at}: 관번호 ${p.id} 중복`);
+    if(!p.up||!p.dn)errs.push(`${at}: 상류/하류 맨홀 누락`);
+    if(!(p.L>0))errs.push(`${at}: 관 연장이 0 이하`);
+    if(!(p.D>0))errs.push(`${at}: 관경(높이)이 0 이하`);
+    ids.add(p.id);pipes.push(p);
+  }
+  return{head:rows.slice(0,h+1),pipes,errs};
+};
+// 지장물 열: "구간내거리,INV,규격,이름;..."  규격은 mm 또는 "폭*높이"(m)
+PT.size=s=>{s=String(s??'').trim();if(s.includes('*')){const [w,h]=s.split('*').map(PT.num);return{w,h,box:true};}const d=PT.num(s)/1000;return{w:d,h:d,box:false};};
+PT.parseObsStr=str=>String(str||'').split(';').filter(x=>x.trim()).map(t=>{const [off,inv,size,...nm]=t.split(',');const z=PT.size(size);return{off:PT.num(off),inv:PT.num(inv),...z,size:String(size??'').trim(),name:nm.join(',').trim()};}).filter(o=>isFinite(o.off)&&isFinite(o.inv));
+PT.obsStr=obs=>obs.map(o=>[+o.off.toFixed(3),o.inv,o.size,o.name].join(',')).join(';');
+// 종단파일 (1행 옵션명, 2행 옵션값, 3행 열제목, 4행~ 측점, 빈 행 뒤 지장물 표)
+PT.parseProfile=rows=>{
+  const h=PT.findRow(rows,r=>r.includes('누가거리')&&r.includes('관저고'));
+  const hdr=(rows[h]||[]).map(PT.norm),col=(name,def)=>{const i=hdr.indexOf(name);return i>=0?i:def;};
+  const C={ch:col('누가거리',1),gh:col('지반고',2),inv:col('관저고',3),dia:col('관경',4),mh:col('맨홀',5),x:col('X1',24),y:col('Y1',25)};
+  const on=(rows[h-2]||[]).map(PT.norm),ov=rows[h-1]||[],opt={};on.forEach((k,i)=>{if(k)opt[k]=ov[i];});
+  const stations=[];let i=h+1;
+  for(;i<rows.length;i++){
+    const r=rows[i]||[],ch=PT.num(r[C.ch]);
+    if(!isFinite(ch)){if(PT.norm(r[C.ch])==='')continue;break;}
+    stations.push({row:i,raw:r.slice(),ch,gh:PT.num(r[C.gh]),inv:PT.num(r[C.inv]),dia:PT.num(r[C.dia]),mh:String(r[C.mh]??'').trim(),P:PT.norm(r[0])==='P',x:PT.num(r[C.x]),y:PT.num(r[C.y])});
+  }
+  const chainInt=PT.num(opt['chain'])||20;
+  const obs=[];let obsHead=-1;
+  for(;i<rows.length;i++){const r=(rows[i]||[]).map(PT.norm);if(r.includes('측점')&&r.includes('INV')){obsHead=i;break;}}
+  if(obsHead>=0)for(let k=obsHead+1;k<rows.length;k++){
+    const r=rows[k]||[],sta=String(r[1]??'').trim();if(!sta)continue;
+    const [a,b]=sta.split('+');const ch=PT.num(a)*chainInt+(PT.num(b)||0);
+    const z=PT.size(r[3]);
+    obs.push({row:k,ch,inv:PT.num(r[2]),...z,size:String(r[3]??'').trim(),name:String(r[4]??'').trim()});
+  }
+  return{rows:rows.map(r=>(r||[]).slice()),h,C,opt,chainInt,line:String(opt['라인명']??'').trim()||'노선',ptype:String(opt['관종']??'').trim(),stations,obs};
+};
+// 종단파일 → 관로: 맨홀(맨홀 열이 채워진 측점) 사이마다 관로 1개
+PT.profileToPipes=(prof,line)=>{
+  const ms=prof.stations.filter(s=>s.mh),pipes=[];
+  for(let k=0;k<ms.length-1;k++){
+    const a=ms[k],b=ms[k+1];
+    const mids=prof.stations.filter(s=>s.ch>a.ch&&s.ch<b.ch);
+    const n=prof.ptype==='PE'?0.010:0.013;
+    pipes.push({line:line||prof.line,id:a.mh,up:a.mh,dn:b.mh,L:+(b.ch-a.ch).toFixed(3),area:0,W:0,D:a.dia||200,nb:1,
+      ghUp:a.gh,ghDn:b.gh,invUp:a.inv,invDn:b.inv,n,C:0,ext:0,tin:0,note:'',dens:0,won:0,gwon:0,pf:1,
+      x1:a.x,y1:a.y,x2:b.x,y2:b.y,sect:'',ptype:prof.ptype,obsStr:'',mhType:'',drop:'',vertex:'',layer:'',
+      st:mids.map(s=>({c:+(s.ch-a.ch).toFixed(3),g:s.gh,x:s.x,y:s.y,P:s.P})),
+      obs:prof.obs.filter(o=>o.ch>=a.ch&&o.ch<b.ch).map(o=>({...o,off:o.ch-a.ch})),
+      prof:{a:a.mh,b:b.mh}});
+  }
+  return pipes;
+};
+// 종단(기하) + 수리(유량·조도) 합치기: 맨홀 좌표로 짝을 찾고, 없으면 순서로 맞춘다. 기하는 종단파일 기준.
+PT.merge=(geo,hyd,used=new Set(),allowOrder=true)=>{
+  const near=(x,y)=>{if(!(isFinite(x)&&isFinite(y)&&(x||y)))return null;let best=null,bd=0.25;
+    hyd.forEach(p=>{if(used.has(p))return;const d=Math.hypot(p.x1-x,p.y1-y);if(d<bd){bd=d;best=p;}});return best;};
+  const free=hyd.filter(p=>!used.has(p));
+  let byOrder=0;const warn=[];
+  const out=geo.map((g,i)=>{
+    let h=near(g.x1,g.y1);
+    if(!h&&allowOrder&&free.length===geo.length&&!used.has(free[i])){h=free[i];byOrder++;}
+    if(!h)return g;
+    used.add(h);
+    if(Math.abs(h.L-g.L)>0.5)warn.push(`${h.id}: 연장 종단 ${g.L} / 수리 ${h.L}`);
+    if(Math.abs(h.invUp-g.invUp)>0.005||Math.abs(h.invDn-g.invDn)>0.005)warn.push(`${h.id}: 관저고 종단 ${g.invUp}/${g.invDn} · 수리 ${h.invUp}/${h.invDn} → 종단 기준`);
+    return{...h,L:g.L,ghUp:g.ghUp,ghDn:g.ghDn,invUp:g.invUp,invDn:g.invDn,D:g.D||h.D,x1:g.x1,y1:g.y1,x2:g.x2,y2:g.y2,st:g.st,obs:g.obs.length?g.obs:h.obs,prof:g.prof};
+  });
+  return{pipes:out,byOrder,warn};
+};
+// 좌표가 같은 맨홀은 이름이 달라도 하나의 노드로 (지선 접속)
+PT.unifyNodes=pipes=>{
+  const key=(x,y)=>isFinite(x)&&isFinite(y)&&(x||y)?`${Math.round(x*10)},${Math.round(y*10)}`:null;
+  const canon=new Map();
+  pipes.forEach(p=>{[[p.up,p.x1,p.y1],[p.dn,p.x2,p.y2]].forEach(([n,x,y])=>{const k=key(x,y);if(k&&!canon.has(k))canon.set(k,n);});});
+  pipes.forEach(p=>{const ku=key(p.x1,p.y1),kd=key(p.x2,p.y2);if(ku)p.up=canon.get(ku);if(kd)p.dn=canon.get(kd);});
+};
+PT.fmt=v=>v===null||v===undefined?'':typeof v==='number'?String(+v.toFixed(6)):String(v);
+PT.toTSV=rows=>rows.map(r=>{const a=(r||[]).map(PT.fmt);while(a.length&&a[a.length-1]==='')a.pop();return a.join('\t');}).join('\n');
+// 수정된 관저·지반·관경을 원래 종단파일 행에 되돌려 쓴다. 측점 사이 관저고는 맨홀 사이 직선 보간.
+PT.exportProfile=(prof,route)=>{
+  const rows=prof.rows.map(r=>r.slice()),C=prof.C;
+  const pm=new Map(route.filter(p=>p.prof).map(p=>[p.prof.a,p]));
+  const ms=prof.stations.filter(s=>s.mh);
+  // PipeTools는 측점 관저고를 소수 2자리로 기록 (맨홀은 입력값 그대로)
+  const set=(r,c,v,old,dp=3)=>{if(!isFinite(v))return;v=+v.toFixed(dp);if(isFinite(old)&&Math.abs(v-old)<0.0005)return;rows[r][c]=v;};
+  prof.stations.forEach(s=>{
+    let k=-1;for(let j=0;j<ms.length-1;j++)if(s.ch>=ms[j].ch&&s.ch<ms[j+1].ch){k=j;break;}
+    const last=ms[ms.length-1];
+    if(k<0&&s===last){const p=pm.get(ms[ms.length-2]?.mh);if(p){set(s.row,C.inv,p.invDn,s.inv);set(s.row,C.gh,p.ghDn,s.gh);set(s.row,C.dia,p.D,s.dia);}return;}
+    if(k<0)return;
+    const p=pm.get(ms[k].mh);if(!p)return;
+    const c=s.ch-ms[k].ch;
+    set(s.row,C.inv,p.invUp+(p.invDn-p.invUp)*c/p.L,s.inv,s.mh?3:2);
+    set(s.row,C.dia,p.D,s.dia);
+    if(s.mh)set(s.row,C.gh,p.ghUp,s.gh);
+  });
+  return rows;
+};
+// 종단파일이 없는 노선은 새로 만든다 (맨홀 + chain 간격 측점)
+PT.newProfile=(route,line,chainInt=20)=>{
+  const optN=['','HScale','Vscale','chain','시작지반','Type','종단분할','라인명','관종','맨홀INV'];
+  const optV=['',500,100,chainInt,'','A','',line,route[0]?.ptype||'',0];
+  const head=['','누가거리','지반고','관저고','관경','맨홀','TEXT1','TEXT2','구간','구배','INV','SIZE','라인명','관방향','관번호','관  종','지하수위','풍화암','연  암','관기초','굴착장비','VIP','VCL','FH','X1','Y1'];
+  const rows=[optN,optV,head];const total=route.reduce((a,p)=>a+p.L,0);
+  const staName=ch=>{const n=Math.floor(ch/chainInt+1e-9),r=+(ch-n*chainInt).toFixed(3);return r?`No.${n}+${r}`:`No.${n}`;};
+  let ch0=0;
+  route.forEach((p,i)=>{
+    const pts=[{c:0,mh:p.up}];
+    for(let c=Math.ceil((ch0+1e-6)/chainInt)*chainInt;c<ch0+p.L-1e-6;c+=chainInt)if(c>ch0)pts.push({c:c-ch0});
+    if(i===route.length-1)pts.push({c:p.L,mh:p.dn});
+    pts.forEach(t=>{
+      const f=t.c/p.L,gh=p.ghUp+(p.ghDn-p.ghUp)*f,z=p.invUp+(p.invDn-p.invUp)*f;
+      const hasXY=isFinite(p.x1)&&(p.x1||p.y1);
+      const r=[t.mh?'P':'',+(ch0+t.c).toFixed(3),+gh.toFixed(3),+z.toFixed(3),p.D,t.mh||''];
+      r[24]=hasXY?+(p.x1+(p.x2-p.x1)*f).toFixed(4):'';r[25]=hasXY?+(p.y1+(p.y2-p.y1)*f).toFixed(4):'';
+      r[42]=staName(ch0+t.c);r[43]=+gh.toFixed(3);r[44]=t.mh||'';
+      rows.push(r);
+    });
+    ch0+=p.L;
+  });
+  return rows;
+};
+// 수리계산 시트 내보내기 (A~AG). 읽어온 행이 있으면 바뀐 값만 덮어쓴다.
+PT.exportHyd=(pipes,head)=>{
+  const top=head&&head.length?head.map(r=>r.slice()):[['TYPE1','TYPE2','TYPE3'],[1,1,1],HEAD];
+  return top.concat(pipes.map(p=>{
+    const r=p.raw?p.raw.slice():COLS.map(k=>p[k]??'');
+    while(r.length<COLS.length)r.push('');
+    (p.raw?['L','D','ghUp','ghDn','invUp','invDn']:['line','id','up','dn','L','D','ghUp','ghDn','invUp','invDn']).forEach(k=>{const i=COLS.indexOf(k),v=p[k];
+      if(typeof v==='number'){if(!(isFinite(PT.num(r[i]))&&Math.abs(PT.num(r[i])-v)<0.0005))r[i]=+v.toFixed(3);}else r[i]=v;});
+    return r;
+  }));
+};
 </script>
 
 <script>
@@ -378,7 +557,8 @@ function parseTSV(text){
 const $=s=>document.querySelector(s);
 const NS='http://www.w3.org/2000/svg';
 const clone=o=>JSON.parse(JSON.stringify(o));
-const crit={vmin:0.6,vmax:3.0,cover:1.0};
+const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,clear:0.3};
+const doc={profiles:new Map(),hydHead:null,file:''};
 let pipes=SAMPLE.map(rowToPipe);
 let res=null,routes=null;
 const ui={route:'본선',sel:'P-03',handle:{pid:'P-03',end:'dn'},linked:true,tableAll:false,yFrame:null,range:null};
@@ -426,10 +606,15 @@ function renderTabs(){
     return `<button class="tab${k===ui.route?' on':''}" data-r="${esc(k)}"><span style="color:var(--${stCls(worst)})">●</span> ${esc(k)}</button>`;}).join('');
 }
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
-function selectRoute(r,pid){if(r!==ui.route)ui.range=null;ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
+function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.hz=null;}ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
 
 /* ---------- 평면 ---------- */
 function layoutPlan(){
+  // 모든 맨홀에 좌표가 있으면 실제 평면 좌표 사용 (CAD Y는 위쪽이 +)
+  const hasXY=v=>isFinite(v)&&v!==''&&v!==0;
+  if(pipes.every(p=>hasXY(p.x1)&&hasXY(p.y1)&&hasXY(p.x2)&&hasXY(p.y2))){
+    const P0={};pipes.forEach(p=>{P0[p.up]=P0[p.up]||[+p.x1,-p.y1];P0[p.dn]=P0[p.dn]||[+p.x2,-p.y2];});return P0;
+  }
   const pos={},dirOf={},placed=new Set(),names=[...routes.keys()],side={};
   const place=(nm,anchor,dir)=>{
     const ch=routes.get(nm),last=ch[ch.length-1];
@@ -464,6 +649,8 @@ function renderPlan(){
   const rangeIds=new Set(ui.range?ch.slice(ui.range.i0,ui.range.i1).map(p=>p.id):[]);
   const seg=p=>{const a=pos[p.up],b=pos[p.dn];return a&&b?[X(a[0]),Y(a[1]),X(b[0]),Y(b[1])]:null;};
   const ln=(c,st)=>`<line x1="${c[0]}" y1="${c[1]}" x2="${c[2]}" y2="${c[3]}" ${st} stroke-linecap="round"/>`;
+  const boxes=[],free=(x,y,w,hh)=>{if(boxes.some(b=>x<b[0]+b[2]&&x+w>b[0]&&y<b[1]+b[3]&&y+hh>b[1]))return false;boxes.push([x,y,w,hh]);return true;};
+  $('#planTitle').textContent=pipes.every(p=>isFinite(p.x1)&&p.x1!==''&&p.x1!==0)?'관망 평면 (좌표)':'관망 평면 (모식도)';
   let h='';
   // 1) 현재 노선 바탕 강조 (종단에 띄운 노선)
   ch.forEach(p=>{const c=seg(p);if(c)h+=ln(c,`stroke="var(--accent)" stroke-width="14" stroke-opacity=".18" pointer-events="none"`);});
@@ -473,13 +660,13 @@ function renderPlan(){
     const r=res.get(p.id),on=inRoute.has(p.id),sel=p.id===ui.sel;
     const [xa,ya,xb,yb]=c,mx=(xa+xb)/2,my=(ya+yb)/2;
     const ang=Math.atan2(yb-ya,xb-xa),ax=Math.cos(ang),ay=Math.sin(ang),col=`var(--${stCls(r.st)})`;
-    h+=`<g data-pid="${esc(p.id)}" style="cursor:pointer" opacity="${on?1:.38}">`+
+    h+=`<g data-pid="${esc(p.id)}" style="cursor:pointer" opacity="${on?1:.72}">`+
       (sel?ln(c,`stroke="var(--accent)" stroke-width="10" stroke-opacity=".45"`):'')+
-      ln(c,`stroke="${col}" stroke-width="${on?4.5:2}"`)+
+      ln(c,`stroke="${col}" stroke-width="${on?4.5:2.6}"`)+
       (rangeIds.has(p.id)?ln(c,`stroke="var(--panel)" stroke-width="1.6" stroke-dasharray="4 4"`):'')+
       ln(c,`stroke="transparent" stroke-width="16"`)+
       `<path d="M${mx+ax*5} ${my+ay*5} L${mx-ax*3-ay*4} ${my-ay*3+ax*4} L${mx-ax*3+ay*4} ${my-ay*3-ax*4}Z" fill="${col}"/>`+
-      `<text x="${mx-ay*12}" y="${my+ax*12+3}" font-size="9.5" text-anchor="middle" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}">${esc(p.id)}</text></g>`;
+      (p.id!==p.up&&free(mx-ay*12-p.id.length*3,my+ax*12-6,p.id.length*6,11)?`<text x="${mx-ay*12}" y="${my+ax*12+3}" font-size="9.5" text-anchor="middle" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}">${esc(p.id)}</text>`:'')+`</g>`;
   };
   pipes.filter(p=>!inRoute.has(p.id)).forEach(drawPipe);
   ch.forEach(drawPipe);
@@ -488,7 +675,7 @@ function renderPlan(){
   const nodes=new Set();pipes.forEach(p=>{nodes.add(p.up);nodes.add(p.dn);});
   nodes.forEach(n=>{const q=pos[n];if(!q)return;const on=routeNodes.has(n);
     h+=`<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="${on?4.2:3.2}" fill="var(--panel)" stroke="${on?'var(--accent)':'var(--muted)'}" stroke-width="${on?1.8:1}"/>`+
-       `<text x="${X(q[0])+5}" y="${Y(q[1])-6}" font-size="9.5" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}" opacity="${on?1:.7}">${esc(n)}</text>`;});
+       (!free(X(q[0])+5,Y(q[1])-15,n.length*6,11)?'':`<text x="${X(q[0])+5}" y="${Y(q[1])-6}" font-size="9.5" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}" opacity="${on?1:.7}">${esc(n)}</text>`);});
   // 4) 노선명 표지 (시점 맨홀 옆)
   const st=pos[ch[0].up];
   const en=pos[ch[0].dn];
@@ -514,12 +701,17 @@ function routeGeom(){
 function renderProfile(){
   const wrap=$('#profWrap'),svg=$('#prof');
   const g=routeGeom(),{L0,R0,top,PH,row}=PROF;
-  const W=Math.max(760,wrap.clientWidth),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정'];
+  const fitW=Math.max(760,wrap.clientWidth),avgL=g.total/g.ch.length;
+  const fitPx=(fitW-PROF.L0-20-PROF.R0)/g.total;
+  const pxm=ui.hz||Math.max(fitPx,Math.min(3,70/avgL));ui.pxm=pxm;ui.fitPx=fitPx;
+  const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정'];
   const bandTop=top+PH+22,H=bandTop+bandRows.length*row+6;
   svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   if(!ui.yFrame||!drag){
     let lo=Infinity,hi=-Infinity;
-    g.ch.forEach(p=>{lo=Math.min(lo,p.invUp,p.invDn);hi=Math.max(hi,p.ghUp,p.ghDn);});
+    g.ch.forEach(p=>{lo=Math.min(lo,p.invUp,p.invDn);hi=Math.max(hi,p.ghUp,p.ghDn);
+      (p.st||[]).forEach(t=>{if(isFinite(t.g)){hi=Math.max(hi,t.g);lo=Math.min(lo,t.g);}});
+      (p.obs||[]).forEach(o=>{if(isFinite(o.inv)){lo=Math.min(lo,o.inv);hi=Math.max(hi,o.inv+o.h);}});});
     pipes.forEach(p=>{if(g.nodes.includes(p.dn)&&p.line!==ui.route)lo=Math.min(lo,p.invDn);});
     const pad=(hi-lo)*0.12+0.2;ui.yFrame={lo:lo-pad,hi:hi+pad*0.9};
   }
@@ -533,11 +725,12 @@ function renderProfile(){
     h+=`<line x1="${L0}" x2="${W-R0}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L0-6}" y="${y+3.5}" font-size="10" text-anchor="end" fill="var(--muted)">${z.toFixed(2)}</text>`;}
   h+=`<text x="${L0-6}" y="${top-12}" font-size="10" text-anchor="end" fill="var(--muted)">EL. (m)</text>`;
   // 지반
-  let gl=`M${X(0)} ${Y(g.ch[0].ghUp)}`;g.ch.forEach((p,i)=>{gl+=` L${X(g.cs[i])} ${Y(p.ghUp)} L${X(g.cs[i+1])} ${Y(p.ghDn)}`;});
+  let gl=`M${X(0)} ${Y(g.ch[0].ghUp)}`;g.ch.forEach((p,i)=>{gl+=` L${X(g.cs[i])} ${Y(p.ghUp)}`;(p.st||[]).forEach(t=>{if(isFinite(t.g))gl+=` L${X(g.cs[i]+t.c)} ${Y(t.g)}`;});gl+=` L${X(g.cs[i+1])} ${Y(p.ghDn)}`;});
   h+=`<path d="${gl} L${X(g.total)} ${top+PH} L${X(0)} ${top+PH}Z" fill="var(--soil)" opacity=".75"/>`;
   h+=`<path d="${gl}" fill="none" stroke="var(--ground)" stroke-width="2"/>`;
   // 맨홀
   const MW=10;
+  let lastName=-1e9;
   g.nodes.forEach((n,i)=>{
     const x=X(g.cs[i]);
     const gh=i<g.ch.length?g.ch[i].ghUp:g.ch[i-1].ghDn;
@@ -545,7 +738,8 @@ function renderProfile(){
     const inR=ui.range&&(i===ui.range.i0||i===ui.range.i1);
     if(ui.range)h+=`<rect data-mh="${i}" x="${x-14}" y="${Y(gh)-20}" width="28" height="${Y(low-0.12)-Y(gh)+20}" fill="transparent" style="cursor:pointer"/>`;
     h+=`<rect x="${x-MW/2}" y="${Y(gh)}" width="${MW}" height="${Y(low-0.12)-Y(gh)}" fill="${inR?'var(--accent-soft)':'var(--panel)'}" stroke="${inR?'var(--accent)':'var(--ink)'}" stroke-width="${inR?2:1.1}" pointer-events="none"/>`+
-       `<text x="${x}" y="${Y(gh)-7}" font-size="10.5" font-weight="600" text-anchor="middle" fill="var(--ink)">${esc(n)}</text>`;
+       (x-lastName>=n.length*6.6+6||i===g.nodes.length-1&&x-lastName>20?`<text x="${x}" y="${Y(gh)-7}" font-size="10.5" font-weight="600" text-anchor="middle" fill="var(--ink)">${esc(n)}</text>`:'');
+    if(x-lastName>=n.length*6.6+6)lastName=x;
   });
   // 일직선 구간 표시
   if(ui.range){
@@ -564,9 +758,22 @@ function renderProfile(){
       `<line x1="${x1}" y1="${Y(p.invUp+hh)}" x2="${x2}" y2="${Y(p.invDn+hh)}" stroke="var(--sewage)" stroke-width="1.4" pointer-events="none"/>`;
     const mx=(x1+x2)/2,cy=Y((p.invUp+p.invDn)/2+D);
     const vt=`V ${r.V.toFixed(2)}`;
-    h+=`<g pointer-events="none"><rect x="${mx-30}" y="${cy-40}" width="60" height="17" rx="8.5" fill="${c}"/>`+
+    if(x2-x1>=64)h+=`<g pointer-events="none"><rect x="${mx-30}" y="${cy-40}" width="60" height="17" rx="8.5" fill="${c}"/>`+
        `<text x="${mx}" y="${cy-28}" font-size="11" font-weight="600" text-anchor="middle" fill="var(--panel)">${vt}</text>`+
        `<text x="${mx}" y="${cy-9}" font-size="10" text-anchor="middle" fill="var(--ink)">D${p.D} · ${r.S.toFixed(2)}‰</text></g>`;
+  });
+  // 지장물 (종단파일 하단 표 / 수리시트 지장물 열)
+  g.ch.forEach((p,i)=>{
+    const r=res.get(p.id);
+    (p.obs||[]).forEach((o,k)=>{
+      const x=X(g.cs[i]+Math.max(0,Math.min(p.L,o.off))),ry=Math.max(2.5,o.h*ppm/2),cy=Y(o.inv+o.h/2);
+      const zp=p.invUp+(p.invDn-p.invUp)*Math.max(0,Math.min(p.L,o.off))/p.L,top=o.inv+o.h;
+      const gap=top<=zp?zp-top:o.inv>=zp+p.D/1000?o.inv-(zp+p.D/1000):-1;
+      const col=gap<0?'var(--bad)':gap<crit.clear?'var(--warn)':'var(--muted)';
+      h+=o.box?`<rect x="${x-ry}" y="${cy-ry}" width="${2*ry}" height="${2*ry}" fill="none" stroke="${col}" stroke-width="1.4" pointer-events="none"/>`
+              :`<circle cx="${x}" cy="${cy}" r="${ry}" fill="none" stroke="${col}" stroke-width="1.4" pointer-events="none"/>`;
+      h+=`<text x="${x+ry+3}" y="${cy+3+(k%2)*10}" font-size="9" fill="${col}" pointer-events="none">${esc(o.name)} ${esc(o.size)}${gap<crit.clear?` ${gap<0?'간섭':'이격 '+gap.toFixed(2)}`:''}</text>`;
+    });
   });
   // 분기 유입 표시
   g.nodes.forEach((n,i)=>{
@@ -601,18 +808,21 @@ function renderProfile(){
     h+=`<line x1="0" x2="${W-R0+6}" y1="${y}" y2="${y}" stroke="var(--line)"/><text x="8" y="${y+13}" font-size="10.5" fill="var(--muted)" font-family="var(--sans)">${t}</text>`;});
   h+=`<line x1="${L0-8}" x2="${L0-8}" y1="${bandTop}" y2="${bandTop+bandRows.length*row}" stroke="var(--line)"/>`;
   const T=(x,k,txt,col='var(--ink)',w=400)=>`<text x="${x}" y="${bandTop+k*row+13}" font-size="10.5" text-anchor="middle" fill="${col}" font-weight="${w}">${txt}</text>`;
+  let lastBand=-1e9;
   g.nodes.forEach((n,i)=>{
     const x=X(g.cs[i]),pin=g.ch[i-1],pout=g.ch[i];
     h+=`<line x1="${x}" x2="${x}" y1="${top+PH}" y2="${bandTop+4*row}" stroke="var(--line)" stroke-dasharray="2 3"/>`;
     const gh=pout?pout.ghUp:pin.ghDn;
     const covs=[];if(pin)covs.push(res.get(pin.id).covDn);if(pout)covs.push(res.get(pout.id).covUp);
     const cv=Math.min(...covs);
+    if(x-lastBand<38&&i!==0)return;lastBand=x;
     h+=T(x,0,f2(gh))+T(x,1,pin?f2(pin.invDn):'—',pin&&res.get(pin.id).joint?'var(--bad)':'var(--ink)')+T(x,2,pout?f2(pout.invUp):'—')+T(x,3,f2(cv),cv<crit.cover?'var(--warn)':'var(--ink)',cv<crit.cover?600:400);
   });
   g.ch.forEach((p,i)=>{
     const r=res.get(p.id),x=(X(g.cs[i])+X(g.cs[i+1]))/2,c=`var(--${stCls(r.st)})`;
     const rem=r.rem[0];
-    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+T(x,8,rem,c,600);
+    const sw=X(g.cs[i+1])-X(g.cs[i]);if(sw<36)return;
+    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600));
   });
   svg.innerHTML=h;
 }
@@ -724,7 +934,7 @@ function renderTable(){
     h+=`<tr data-pid="${esc(p.id)}" class="${p.id===ui.sel?'sel':''}"><td class="l">${esc(p.id)}</td><td class="l">${esc(p.line)}</td><td class="l">${esc(p.up)}→${esc(p.dn)}</td><td>${p.L.toFixed(1)}</td>`+
       `<td><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`+
       `<td>${inp('S',r.S.toFixed(2))}</td><td>${inp('invUp',f2(p.invUp))}</td><td>${inp('invDn',f2(p.invDn))}</td><td>${inp('ghUp',f2(p.ghUp))}</td><td>${inp('ghDn',f2(p.ghDn))}</td>`+
-      `<td>${Math.round(r.pop).toLocaleString()}</td><td>${f4(r.Q)}</td><td>${f4(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.use)?(r.use*100).toFixed(0)+'%':'—'}</td><td>${f2(Math.min(r.covUp,r.covDn))}</td>`+
+      `<td>${Math.round(r.pop).toLocaleString()}</td><td>${f4(r.Q)}</td><td>${f4(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.use)?(r.use*100).toFixed(0)+'%':'—'}</td><td style="${r.cmin<crit.cover?'color:var(--warn);font-weight:600':''}">${f2(r.cmin)}</td>`+
       `<td class="l"><span class="remark ${stCls(r.st)}">${r.rem.map(esc).join(' ')}</span></td></tr>`;});
   $('#tbl').innerHTML=h+'</tbody>';
 }
@@ -748,29 +958,87 @@ $('#tAll').onclick=()=>{ui.tableAll=true;$('#tAll').classList.add('on');$('#tRou
 const setMode=l=>{ui.linked=l;$('#mLinked').classList.toggle('on',l);$('#mSingle').classList.toggle('on',!l);renderMbar();};
 $('#mLinked').onclick=()=>setMode(true);$('#mSingle').onclick=()=>setMode(false);
 $('#bUndo').onclick=doUndo;$('#bRedo').onclick=doRedo;
-$('#bReset').onclick=()=>edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});
-['cVmin','cVmax','cCover'].forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
-  crit[{cVmin:'vmin',cVmax:'vmax',cCover:'cover'}[id]]=v;render();}));
+$('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});selectRoute(routesOf(pipes).keys().next().value);};
+const CRIT_IDS={cVmin:'vmin',cVmax:'vmax',cVlow:'vlow',cCover:'cover',cClear:'clear'};
+Object.keys(CRIT_IDS).forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
+  crit[CRIT_IDS[id]]=v;render();}));
 
 function copyText(txt,label){
   const fallback=()=>{$('#dlg').hidden=false;$('#pasteBox').value=txt;$('#pasteBox').select();$('#pasteErr').textContent='클립보드 접근이 막혀 있어 아래에 표시했습니다. Ctrl+C로 복사하세요.';};
   try{navigator.clipboard.writeText(txt).then(()=>toast(label+' 복사됨 · 엑셀에 붙여넣기'),fallback);}catch(_){fallback();}
 }
-$('#bCopyIn').onclick=()=>copyText([HEAD.join('\t'),...[...routes.values()].flat().map(p=>COLS.map(k=>p[k]).join('\t'))].join('\n'),'입력양식');
+$('#bCopyIn').onclick=()=>copyText(PT.toTSV(PT.exportHyd([...routes.values()].flat(),doc.hydHead)),'수리계산 시트');
+$('#bCopyProf').onclick=()=>{
+  const route=routes.get(ui.route),prof=doc.profiles.get(ui.route);
+  const rows=prof?PT.exportProfile(prof,route):PT.newProfile(route,ui.route);
+  copyText(PT.toTSV(rows),`${ui.route} 종단파일${prof?'':' (새로 만듦)'}`);
+};
 $('#bCopyOut').onclick=()=>{
   const hd=['노선명','관로번호','상류','하류','연장','관경','경사(‰)','상류관저','하류관저','상류지반','하류지반','누가인구','Q(m3/s)','Qfull(m3/s)','Qallow(m3/s)','V(m/s)','h/D','사용률(%)','토피min','판정'];
-  const rows=[...routes.values()].flat().map(p=>{const r=res.get(p.id);return[p.line,p.id,p.up,p.dn,p.L,p.D,r.S.toFixed(2),f2(p.invUp),f2(p.invDn),f2(p.ghUp),f2(p.ghDn),Math.round(r.pop),f4(r.Q),f4(r.Qfull),f4(r.Qallow),r.V.toFixed(3),r.hD.toFixed(3),isFinite(r.use)?(r.use*100).toFixed(1):'',f2(Math.min(r.covUp,r.covDn)),r.rem.join(' ')].join('\t');});
+  const rows=[...routes.values()].flat().map(p=>{const r=res.get(p.id);return[p.line,p.id,p.up,p.dn,p.L,p.D,r.S.toFixed(2),f2(p.invUp),f2(p.invDn),f2(p.ghUp),f2(p.ghDn),Math.round(r.pop),f4(r.Q),f4(r.Qfull),f4(r.Qallow),r.V.toFixed(3),r.hD.toFixed(3),isFinite(r.use)?(r.use*100).toFixed(1):'',f2(r.cmin),r.rem.join(' ')].join('\t');});
   copyText([hd.join('\t'),...rows].join('\n'),'계산결과');
 };
 $('#bPaste').onclick=()=>{$('#dlg').hidden=false;$('#pasteErr').textContent='';$('#pasteBox').focus();};
 $('#bClose').onclick=()=>{$('#dlg').hidden=true;};
 $('#bApply').onclick=()=>{
-  const {pipes:np,errs}=parseTSV($('#pasteBox').value);
-  if(errs.length){$('#pasteErr').textContent=errs.join('\n');return;}
+  const text=$('#pasteBox').value,rows=PT.tsvRows(text),kind=PT.kind(rows);
+  let r;
+  if(kind==='profile')r=loadSheets([{name:'붙여넣기',rows}],{keepHyd:true});
+  else if(kind==='hyd')r=loadSheets([{name:'붙여넣기',rows}],{keepProfiles:true});
+  else{const t=parseTSV(text);r=t.errs.length?{errs:t.errs}:applyLoaded(t.pipes,[],null,'붙여넣기');}
+  if(r.errs&&r.errs.length){$('#pasteErr').textContent=r.errs.join('\n');return;}
+  $('#dlg').hidden=true;
+};
+// 시트 묶음 불러오기: 종단파일(기하) + 수리계산 시트(유량)
+function loadSheets(sheets,opt={}){
+  const profs=[],hyds=[],errs=[],warn=[];
+  sheets.forEach(sh=>{const k=PT.kind(sh.rows);if(k==='profile')profs.push({name:sh.name,p:PT.parseProfile(sh.rows)});else if(k==='hyd')hyds.push({name:sh.name,h:PT.parseHyd(sh.rows)});});
+  if(!profs.length&&!hyds.length)return{errs:['종단파일(누가거리·관저고 제목) 또는 수리계산 시트(관 번 호·상류맨홀 제목)를 찾지 못했습니다.']};
+  hyds.forEach(x=>errs.push(...x.h.errs.map(e=>`[${x.name}] ${e}`)));
+  if(errs.length)return{errs};
+  let hyd=hyds.flatMap(x=>x.h.pipes);
+  const fromCurrent=!hyd.length&&opt.keepHyd;
+  if(fromCurrent)hyd=clone(pipes);
+  let profiles=profs.map(x=>x.p);
+  if(!profiles.length&&opt.keepProfiles)profiles=[...doc.profiles.values()];
+  const used=new Set(),geoAll=[],profMap=new Map();
+  profiles.forEach(pf=>{
+    const geo=PT.profileToPipes(pf);
+    if(geo.length===0){warn.push(`종단파일 ${pf.line}: 맨홀이 2개 미만`);return;}
+    const m=PT.merge(geo,hyd,used,!fromCurrent);warn.push(...m.warn);
+    const line=m.pipes.find(p=>p.raw||p.dens||p.ext)?.line||pf.line;
+    m.pipes.forEach(p=>{p.line=line;});
+    profMap.set(line,pf);geoAll.push(...m.pipes);
+  });
+  const hasXY=p=>isFinite(p.x1)&&p.x1!==''&&p.x1!==0;
+  const rest=hyd.filter(p=>!used.has(p)&&(!fromCurrent||hasXY(p)));
+  if(fromCurrent)doc.profiles.forEach((v,k)=>{if(!profMap.has(k)&&rest.some(p=>p.line===k))profMap.set(k,v);});
+  const all=[...geoAll,...rest];
+  return applyLoaded(all,warn,hyds[0]?.h.head||(opt.keepProfiles?null:doc.hydHead),opt.fileName||'붙여넣기',profMap,opt.keepProfiles&&!profs.length);
+}
+function applyLoaded(np,warn,hydHead,name,profMap=new Map(),keepProf=false){
+  if(!np.length)return{errs:['관로를 만들지 못했습니다.']};
+  PT.unifyNodes(np);
+  const ids=new Set();np.forEach(p=>{if(ids.has(p.id))p.id=p.id+'·'+p.line;ids.add(p.id);});
+  if(!keepProf){doc.profiles=profMap;}
+  doc.hydHead=hydHead;doc.file=name;ui.range=null;
   edit(()=>{pipes=np;ui.yFrame=null;});
   routes=routesOf(pipes);selectRoute(routes.keys().next().value);
-  $('#dlg').hidden=true;toast(`관로 ${np.length}개를 불러왔습니다`);
-};
+  const nProf=doc.profiles.size;
+  toast(`관로 ${np.length}개 · 종단파일 ${nProf}개 불러옴`+(warn.length?` · 확인 ${warn.length}건`:''));
+  if(warn.length){$('#dlg').hidden=false;$('#pasteBox').value='';$('#pasteErr').textContent='불러오기 확인 사항\n'+warn.slice(0,30).join('\n');}
+  return{errs:[]};
+}
+$('#fileIn').addEventListener('change',async e=>{
+  const f=e.target.files[0];e.target.value='';if(!f)return;
+  if(typeof XLSX==='undefined'){toast('엑셀 읽기 모듈을 불러오지 못했습니다. 시트 붙여넣기를 사용하세요');return;}
+  try{
+    const wb=XLSX.read(await f.arrayBuffer(),{type:'array'});
+    const sheets=wb.SheetNames.map(n=>({name:n,rows:XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''})}));
+    const r=loadSheets(sheets,{fileName:f.name});
+    if(r.errs&&r.errs.length){$('#dlg').hidden=false;$('#pasteErr').textContent=r.errs.join('\n');}
+  }catch(err){toast('파일을 읽지 못했습니다: '+err.message);}
+});
 
 /* ---------- 구간 일직선 ---------- */
 // 시점 유출관저(zs)와 종점 유입관저(ze)를 고정하고, 사이 관로를 하나의 경사로 정리. 중간 맨홀마다 단차(drop)만큼 낙차.
@@ -820,6 +1088,10 @@ $('#bRange').onclick=()=>{
   toast('시점·종점 맨홀을 골라 구간을 넓히세요 · 되돌리기 가능');
 };
 $('#rOff').onclick=()=>{ui.range=null;render();};
+const zoomTo=pxm=>{const w=$('#profWrap'),c=(w.scrollLeft+w.clientWidth/2)/Math.max(1,w.scrollWidth);ui.hz=pxm;renderProfile();w.scrollLeft=c*w.scrollWidth-w.clientWidth/2;};
+$('#zIn').onclick=()=>zoomTo((ui.pxm||1)*1.5);
+$('#zOut').onclick=()=>zoomTo(Math.max(ui.fitPx||0.1,(ui.pxm||1)/1.5));
+$('#zFit').onclick=()=>zoomTo(ui.fitPx);
 $('#rFrom').onchange=e=>setRange(+e.target.value,ui.range.i1,ui.range.drop);
 $('#rTo').onchange=e=>setRange(ui.range.i0,+e.target.value,ui.range.drop);
 $('#rDrop').onchange=e=>{const v=parseFloat(e.target.value);setRange(ui.range.i0,ui.range.i1,isFinite(v)?v:0);};
