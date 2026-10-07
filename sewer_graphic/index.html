@@ -91,6 +91,12 @@ td select{width:auto}
 .tblwrap{overflow:auto;max-height:420px}
 .filebtn{display:inline-flex;align-items:center;background:var(--accent);color:var(--panel);border:1px solid var(--accent);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;touch-action:manipulation}
 .filebtn:focus-within,.filebtn:hover{filter:brightness(1.08)}
+.methodbox{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px;font-size:13px}
+.methodbox select{border:1px solid var(--line);border-radius:5px;background:var(--panel2);padding:4px 6px;flex:1;min-width:0}
+.mrow2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chk{display:inline-flex;gap:5px;align-items:center;white-space:nowrap}
+td.chg input,td.chg select,td.chg{background:var(--accent-soft);font-weight:600}
+.chip.chg{background:var(--accent-soft);color:var(--accent);border-color:var(--accent);cursor:pointer}
 .dlg{background:var(--panel);border:1px solid var(--accent);border-radius:10px;padding:14px;display:flex;flex-direction:column;gap:10px}
 .dlg textarea{width:100%;min-height:170px;font-family:var(--mono);font-size:12px;border:1px solid var(--line);border-radius:6px;background:var(--panel2);padding:8px;white-space:pre;overflow:auto}
 .err{color:var(--bad);font-size:12.5px;font-family:var(--mono);white-space:pre-wrap}
@@ -125,7 +131,7 @@ button,.tab{touch-action:manipulation}
 .rangebar select,.rangebar input{border:1px solid var(--line);border-radius:5px;background:var(--panel);padding:3px 6px;font-family:var(--mono)}
 .rangebar input{width:70px;text-align:right}
 .rangebar .mono{font-size:12.5px}
-@media (pointer:coarse),(max-width:1000px){.rangebar select,.rangebar input{font-size:16px}}
+@media (pointer:coarse),(max-width:1000px){.methodbox select{font-size:16px}.rangebar select,.rangebar input{font-size:16px}}
 @media (prefers-reduced-motion: reduce){.toast{transition:none}}
 </style>
 
@@ -210,6 +216,11 @@ button,.tab{touch-action:manipulation}
           <button id="bAutoD" title="현재 경사에서 여유율을 만족하는 최소 관경">관경 자동</button>
           <button id="bDUp">관경 ▲</button><button id="bDDn">관경 ▼</button>
         </div>
+        <div class="methodbox">
+          <label for="mCode">굴착 공법 (종단파일 I열)</label>
+          <div class="mrow2"><select id="mCode"></select><label class="chk"><input type="checkbox" id="mProt"> 관보호공 (-B)</label></div>
+          <div class="hint" id="mNote"></div>
+        </div>
       </div>
       <div class="card">
         <div class="card-h"><h2>판정 기준</h2></div>
@@ -272,6 +283,13 @@ const SAMPLE=[
  ['지선2-1','C-01','MC1','MC2',36,2.2,0,200,1,52.30,51.90,50.95,50.55,0.013,0,0,0,'',180,300,30,1.5],
  ['지선2-1','C-02','MC2','MB2',30,1.6,0,200,1,51.90,51.30,50.53,50.10,0.013,0,0,0,'',180,300,30,1.5],
 ];
+// 종단파일 I열(구간) 공법 코드: 공법 2자 + 포장 2자리, "-B" = 관보호공
+const METHODS=[['OP','OPEN CUT'],['GA','간이흙막이'],['SP','SHEET PILE'],['HP','H-PILE'],['SC','추진'],['PH','관매달기']];
+const SURFACES=['토사','ASP','CONC','보도블럭','ASP+CONC','ASP국도'];
+const isProt=c=>/-B$/i.test(String(c||'').trim());
+const codeBase=c=>String(c||'').trim().replace(/-B$/i,'');
+function codeName(c){const m=/^([A-Z]{2})(\d{2})/i.exec(codeBase(c));if(!m)return c||'';const mt=METHODS.find(x=>x[0]===m[1].toUpperCase());
+  return `${mt?mt[1]:m[1]}(${SURFACES[+m[2]-1]||m[2]})${isProt(c)?' + 관보호공':''}`;}
 function rowToPipe(r){const p={};COLS.forEach((k,i)=>p[k]=r[i]===undefined?'':r[i]);return p;}
 const r3=v=>Math.round(v*1000)/1000;
 const marginFor=D=>D<=600?1.0:D<=1500?0.5:0.25;
@@ -341,8 +359,9 @@ function compute(pipes,crit){
       if(u.V>crit.vmax){rem.push('UPPR'+u.V.toFixed(2));bump(1);}
     }
     const zAt=c=>p.invUp+(p.invDn-p.invUp)*c/p.L;
-    let cmin=Math.min(covUp,covDn);
-    (p.st||[]).forEach(t=>{if(isFinite(t.g))cmin=Math.min(cmin,t.g-zAt(t.c)-D);});
+    // 토피 검토점: 상류단, 중간 측점, 하류단. 관보호공(-B) 구간의 점은 따로 센다
+    const st0=p.st||[],pts=[{v:covUp,c:p.code},...st0.filter(t=>isFinite(t.g)).map(t=>({v:t.g-zAt(t.c)-D,c:t.code??p.code})),{v:covDn,c:st0.length?(st0[st0.length-1].code??p.code):p.code}];
+    let cmin=Infinity,cminU=Infinity;pts.forEach(q=>{cmin=Math.min(cmin,q.v);if(!isProt(q.c))cminU=Math.min(cminU,q.v);});
     // 지장물 이격: 관 외면과 지장물 사이 연직 거리
     const obsHits=[],flags=[];
     (p.obs||[]).forEach(o=>{
@@ -351,9 +370,10 @@ function compute(pipes,crit){
       if(gap<(crit.clear??0.3)){obsHits.push({name:o.name,gap});flags.push('OBS'+gap.toFixed(2)+'('+o.name+')');}
     });
     // 토피는 종합판정에 넣지 않고 따로 표시 (지반 굴곡·지장물로 토피를 줄이고 관보호공을 쓰는 경우가 있음)
-    const coverNG=cmin<crit.cover-0.0005;
-    if(coverNG)flags.unshift('COVER'+cmin.toFixed(2));
-    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG});
+    const coverNG=cminU<crit.cover-0.0005,coverProt=!coverNG&&cmin<crit.cover-0.0005;
+    if(coverNG)flags.unshift('COVER'+cminU.toFixed(2));
+    else if(coverProt)flags.unshift('보호공'+cmin.toFixed(2));
+    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU});
   });
   // 맨홀 접합 검토: 유입관 하류관저가 유출관 상류관저보다 낮으면 역류
   const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
@@ -420,6 +440,7 @@ PT.parseHyd=rows=>{
     if(p.n>0)nPrev=p.n;else p.n=nPrev||0.013;
     p.nb=p.nb||1;p.pf=p.pf||1;
     p.obs=PT.parseObsStr(p.obsStr);
+    p.code=String(p.sect||'').split(',')[0].trim();
     p.raw=c.slice();p.rawRow=i;
     const at=`${i+1}행`;
     if(ids.has(p.id))errs.push(`${at}: 관번호 ${p.id} 중복`);
@@ -438,13 +459,13 @@ PT.obsStr=obs=>obs.map(o=>[+o.off.toFixed(3),o.inv,o.size,o.name].join(',')).joi
 PT.parseProfile=rows=>{
   const h=PT.findRow(rows,r=>r.includes('누가거리')&&r.includes('관저고'));
   const hdr=(rows[h]||[]).map(PT.norm),col=(name,def)=>{const i=hdr.indexOf(name);return i>=0?i:def;};
-  const C={ch:col('누가거리',1),gh:col('지반고',2),inv:col('관저고',3),dia:col('관경',4),mh:col('맨홀',5),x:col('X1',24),y:col('Y1',25)};
+  const C={ch:col('누가거리',1),gh:col('지반고',2),inv:col('관저고',3),dia:col('관경',4),mh:col('맨홀',5),code:col('구간',8),x:col('X1',24),y:col('Y1',25)};
   const on=(rows[h-2]||[]).map(PT.norm),ov=rows[h-1]||[],opt={};on.forEach((k,i)=>{if(k)opt[k]=ov[i];});
   const stations=[];let i=h+1;
   for(;i<rows.length;i++){
     const r=rows[i]||[],ch=PT.num(r[C.ch]);
     if(!isFinite(ch)){if(PT.norm(r[C.ch])==='')continue;break;}
-    stations.push({row:i,raw:r.slice(),ch,gh:PT.num(r[C.gh]),inv:PT.num(r[C.inv]),dia:PT.num(r[C.dia]),mh:String(r[C.mh]??'').trim(),P:PT.norm(r[0])==='P',x:PT.num(r[C.x]),y:PT.num(r[C.y])});
+    stations.push({row:i,raw:r.slice(),ch,gh:PT.num(r[C.gh]),inv:PT.num(r[C.inv]),dia:PT.num(r[C.dia]),mh:String(r[C.mh]??'').trim(),code:String(r[C.code]??'').trim(),P:PT.norm(r[0])==='P',x:PT.num(r[C.x]),y:PT.num(r[C.y])});
   }
   const chainInt=PT.num(opt['chain'])||20;
   const obs=[];let obsHead=-1;
@@ -467,7 +488,7 @@ PT.profileToPipes=(prof,line)=>{
     pipes.push({line:line||prof.line,id:a.mh,up:a.mh,dn:b.mh,L:+(b.ch-a.ch).toFixed(3),area:0,W:0,D:a.dia||200,nb:1,
       ghUp:a.gh,ghDn:b.gh,invUp:a.inv,invDn:b.inv,n,C:0,ext:0,tin:0,note:'',dens:0,won:0,gwon:0,pf:1,
       x1:a.x,y1:a.y,x2:b.x,y2:b.y,sect:'',ptype:prof.ptype,obsStr:'',mhType:'',drop:'',vertex:'',layer:'',
-      st:mids.map(s=>({c:+(s.ch-a.ch).toFixed(3),g:s.gh,x:s.x,y:s.y,P:s.P})),
+      code:a.code,st:mids.map(s=>({c:+(s.ch-a.ch).toFixed(3),g:s.gh,x:s.x,y:s.y,P:s.P,code:s.code})),
       obs:prof.obs.filter(o=>o.ch>=a.ch&&o.ch<b.ch).map(o=>({...o,off:o.ch-a.ch})),
       prof:{a:a.mh,b:b.mh}});
   }
@@ -486,7 +507,7 @@ PT.merge=(geo,hyd,used=new Set(),allowOrder=true)=>{
     used.add(h);
     if(Math.abs(h.L-g.L)>0.5)warn.push(`${h.id}: 연장 종단 ${g.L} / 수리 ${h.L}`);
     if(Math.abs(h.invUp-g.invUp)>0.005||Math.abs(h.invDn-g.invDn)>0.005)warn.push(`${h.id}: 관저고 종단 ${g.invUp}/${g.invDn} · 수리 ${h.invUp}/${h.invDn} → 종단 기준`);
-    return{...h,L:g.L,ghUp:g.ghUp,ghDn:g.ghDn,invUp:g.invUp,invDn:g.invDn,D:g.D||h.D,x1:g.x1,y1:g.y1,x2:g.x2,y2:g.y2,st:g.st,obs:g.obs.length?g.obs:h.obs,prof:g.prof};
+    return{...h,L:g.L,ghUp:g.ghUp,ghDn:g.ghDn,invUp:g.invUp,invDn:g.invDn,D:g.D||h.D,x1:g.x1,y1:g.y1,x2:g.x2,y2:g.y2,st:g.st,code:g.code||h.code,obs:g.obs.length?g.obs:h.obs,prof:g.prof};
   });
   return{pipes:out,byOrder,warn};
 };
@@ -516,6 +537,8 @@ PT.exportProfile=(prof,route)=>{
     set(s.row,C.inv,p.invUp+(p.invDn-p.invUp)*c/p.L,s.inv,s.mh?3:2);
     set(s.row,C.dia,p.D,s.dia);
     if(s.mh)set(s.row,C.gh,p.ghUp,s.gh);
+    const code=s.mh?p.code:(p.st||[]).find(t=>Math.abs(t.c-c)<1e-6)?.code;
+    if(code!==undefined&&code!==s.code)rows[s.row][C.code]=code;
   });
   return rows;
 };
@@ -535,6 +558,7 @@ PT.newProfile=(route,line,chainInt=20)=>{
       const f=t.c/p.L,gh=p.ghUp+(p.ghDn-p.ghUp)*f,z=p.invUp+(p.invDn-p.invUp)*f;
       const hasXY=isFinite(p.x1)&&(p.x1||p.y1);
       const r=[t.mh?'P':'',+(ch0+t.c).toFixed(3),+gh.toFixed(3),+z.toFixed(3),p.D,t.mh||''];
+      r[8]=p.code||'';
       r[24]=hasXY?+(p.x1+(p.x2-p.x1)*f).toFixed(4):'';r[25]=hasXY?+(p.y1+(p.y2-p.y1)*f).toFixed(4):'';
       r[42]=staName(ch0+t.c);r[43]=+gh.toFixed(3);r[44]=t.mh||'';
       rows.push(r);
@@ -551,6 +575,8 @@ PT.exportHyd=(pipes,head)=>{
     while(r.length<COLS.length)r.push('');
     (p.raw?['L','D','ghUp','ghDn','invUp','invDn']:['line','id','up','dn','L','D','ghUp','ghDn','invUp','invDn']).forEach(k=>{const i=COLS.indexOf(k),v=p[k];
       if(typeof v==='number'){if(!(isFinite(PT.num(r[i]))&&Math.abs(PT.num(r[i])-v)<0.0005))r[i]=+v.toFixed(3);}else r[i]=v;});
+    // 수리시트 AA(구간) = "공법코드,연장"
+    const ai=COLS.indexOf('sect');if(p.code&&String(r[ai]).split(',')[0].trim()!==p.code)r[ai]=`${p.code},${+(+p.L).toFixed(3)}`;
     return r;
   }));
 };
@@ -562,8 +588,15 @@ const $=s=>document.querySelector(s);
 const NS='http://www.w3.org/2000/svg';
 const clone=o=>JSON.parse(JSON.stringify(o));
 const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,clear:0.3};
-const doc={profiles:new Map(),hydHead:null,file:''};
+const doc={profiles:new Map(),hydHead:null,file:'',base:new Map()};
+// 불러온 시점 값 (변경 추적용)
+const BASE_KEYS=['invUp','invDn','ghUp','ghDn','D','code'];
+function snapBase(){doc.base=new Map(pipes.map(p=>[p.id,Object.fromEntries(BASE_KEYS.map(k=>[k,p[k]??'']))]));}
+function changedKeys(p){const b=doc.base.get(p.id);if(!b)return BASE_KEYS.slice();return BASE_KEYS.filter(k=>typeof b[k]==='number'?Math.abs((+p[k])-b[k])>0.0005:String(p[k]??'')!==String(b[k]));}
+function changeList(){const out=[];const nm={invUp:'상류관저',invDn:'하류관저',ghUp:'상류지반',ghDn:'하류지반',D:'관경',code:'공법'};
+  pipes.forEach(p=>{const b=doc.base.get(p.id);changedKeys(p).forEach(k=>out.push(`${p.id}  ${nm[k]}  ${b?b[k]:'(새 관로)'} → ${p[k]}`));});return out;}
 let pipes=SAMPLE.map(rowToPipe);
+snapBase();
 let res=null,routes=null;
 const ui={route:'본선',sel:'P-03',handle:{pid:'P-03',end:'dn'},linked:true,tableAll:false,yFrame:null,range:null};
 const undo=[],redo=[];
@@ -604,13 +637,16 @@ function renderSummary(){
   $('#summary').innerHTML=`<span class="chip">관로 ${pipes.length}</span><span class="chip">방류 Q ${f4(out)} m³/s</span>`+
     `<span class="chip good">적합 ${c[0]}</span><span class="chip warn">주의 ${c[1]}</span><span class="chip bad">불량 ${c[2]}</span>`+
     (()=>{const nc=[...res.values()].filter(r=>r.coverNG).length,no=[...res.values()].filter(r=>r.obsHits.length).length;
-      return (nc?`<span class="chip flag">토피 부족 ${nc}</span>`:'')+(no?`<span class="chip flag">지장물 근접 ${no}</span>`:'');})();
+      const nch=pipes.filter(p=>changedKeys(p).length).length;
+      return (nch?`<button class="chip chg" id="chgChip" title="불러온 값과 달라진 관로">변경 ${nch}</button>`:'')+(nc?`<span class="chip flag">토피 부족 ${nc}</span>`:'')+(no?`<span class="chip flag">지장물 근접 ${no}</span>`:'');})();
 }
 function renderTabs(){
   $('#tabs').innerHTML=[...routes.keys()].map(k=>{
     const worst=Math.max(...routes.get(k).map(p=>res.get(p.id).st));
     return `<button class="tab${k===ui.route?' on':''}" data-r="${esc(k)}"><span style="color:var(--${stCls(worst)})">●</span> ${esc(k)}</button>`;}).join('');
 }
+$('#summary').addEventListener('click',e=>{if(!e.target.closest('#chgChip'))return;
+  $('#dlg').hidden=false;$('#pasteBox').value=changeList().join('\n');$('#pasteErr').textContent='불러온 값과 달라진 항목 (종단파일·수리시트 복사 시 이 값들이 반영됩니다)';});
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
 function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.hz=null;}ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
 
@@ -710,7 +746,7 @@ function renderProfile(){
   const fitW=Math.max(760,wrap.clientWidth),avgL=g.total/g.ch.length;
   const fitPx=(fitW-PROF.L0-20-PROF.R0)/g.total;
   const pxm=ui.hz||Math.max(fitPx,Math.min(3,70/avgL));ui.pxm=pxm;ui.fitPx=fitPx;
-  const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정'];
+  const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정','공법'];
   const bandTop=top+PH+22,H=bandTop+bandRows.length*row+6;
   svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   if(!ui.yFrame||!drag){
@@ -767,6 +803,13 @@ function renderProfile(){
     if(x2-x1>=64)h+=`<g pointer-events="none"><rect x="${mx-30}" y="${cy-40}" width="60" height="17" rx="8.5" fill="${c}"/>`+
        `<text x="${mx}" y="${cy-28}" font-size="11" font-weight="600" text-anchor="middle" fill="var(--panel)">${vt}</text>`+
        `<text x="${mx}" y="${cy-9}" font-size="10" text-anchor="middle" fill="var(--ink)">D${p.D} · ${r.S.toFixed(2)}‰</text></g>`;
+  });
+  // 관보호공(-B) 구간: 관 둘레에 점선 보호층
+  g.ch.forEach((p,i)=>{
+    const D=p.D/1000,cuts=[{c:0,code:p.code},...(p.st||[]).map(t=>({c:t.c,code:t.code??p.code})),{c:p.L,code:null}];
+    for(let k=0;k<cuts.length-1;k++){if(!isProt(cuts[k].code))continue;
+      const a=cuts[k].c,b=cuts[k+1].c,za=p.invUp+(p.invDn-p.invUp)*a/p.L,zb=p.invUp+(p.invDn-p.invUp)*b/p.L,xa=X(g.cs[i]+a),xb=X(g.cs[i]+b),pad=0.12;
+      h+=`<polygon points="${xa},${Y(za-pad)} ${xb},${Y(zb-pad)} ${xb},${Y(zb+D+pad)} ${xa},${Y(za+D+pad)}" fill="var(--accent)" fill-opacity=".10" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" pointer-events="none"/>`;}
   });
   // 지장물 (종단파일 하단 표 / 수리시트 지장물 열)
   g.ch.forEach((p,i)=>{
@@ -828,7 +871,8 @@ function renderProfile(){
     const r=res.get(p.id),x=(X(g.cs[i])+X(g.cs[i+1]))/2,c=`var(--${stCls(r.st)})`;
     const rem=r.rem[0];
     const sw=X(g.cs[i+1])-X(g.cs[i]);if(sw<36)return;
-    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600));
+    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600))+
+      (sw>=(p.code||'').length*6.4+4?T(x,9,esc(p.code||'')+((p.st||[]).some(t=>(t.code??p.code)!==p.code)?'*':''),isProt(p.code)?'var(--accent)':'var(--muted)',isProt(p.code)?600:400):'');
   });
   svg.innerHTML=h;
 }
@@ -917,11 +961,20 @@ function renderSection(){
     ['실유속',r.V.toFixed(2)+' m/s'],
     ['토피 상/하',f2(r.covUp)+' / '+f2(r.covDn)+' m'],
     ['판정',r.rem.map(x=>`<span class="remark ${stCls(r.st)}">${esc(x)}</span>`).join(' ')],
-    ['토피 검토',r.coverNG?`<span class="flagtxt">부적합 ${f2(r.cmin)} m</span>`:`<span class="remark good">적합</span>`],
+    ['토피 검토',r.coverNG?`<span class="flagtxt">부적합 ${f2(r.cminU)} m</span>`:r.coverProt?`<span class="remark">관보호공 구간 ${f2(r.cmin)} m</span>`:`<span class="remark good">적합</span>`],
     ...(r.obsHits.length?[['지장물',r.obsHits.map(o=>`<span class="flagtxt">${esc(o.name)} ${o.gap<0?'간섭':'이격 '+o.gap.toFixed(2)}</span>`).join(' ')]]:[]),
   ];
   $('#secKv').innerHTML=kv.map(([k,v])=>`<dt>${k}</dt><dd>${v}</dd>`).join('');
+  const base=codeBase(p.code),opts=[['','(없음)']];METHODS.forEach(([m,mn])=>SURFACES.forEach((sf,i)=>opts.push([`${m}0${i+1}`,`${m}0${i+1}  ${mn} · ${sf}`])));
+  if(base&&!opts.some(o=>o[0]===base))opts.push([base,base]);
+  $('#mCode').innerHTML=opts.map(([v,t])=>`<option value="${esc(v)}"${v===base?' selected':''}>${esc(t)}</option>`).join('');
+  $('#mProt').checked=isProt(p.code);
+  const mixed=(p.st||[]).some(t=>(t.code??p.code)!==p.code);
+  $('#mNote').textContent=mixed?`이 관로 안에서 측점마다 공법이 다릅니다 (${[...new Set([p.code,...p.st.map(t=>t.code??p.code)])].join(', ')}). 바꾸면 관로 전체에 적용됩니다.`:(p.code?codeName(p.code):'');
 }
+function setCode(pid,code){const p=P(pid);edit(()=>{p.code=code;(p.st||[]).forEach(t=>{t.code=code;});});}
+$('#mCode').onchange=()=>{const v=$('#mCode').value;setCode(ui.sel,v?v+($('#mProt').checked?'-B':''):'');};
+$('#mProt').onchange=()=>{const b=$('#mCode').value||codeBase(P(ui.sel).code);if(!b){toast('먼저 굴착 공법을 고르세요');$('#mProt').checked=false;return;}setCode(ui.sel,b+($('#mProt').checked?'-B':''));};
 $('#bFitV').onclick=()=>{const p=P(ui.sel),r=res.get(p.id);
   const S=slopeForV(p,r.Q,crit.vmin+0.005);
   const target=Math.floor((p.invUp-S*p.L)*100)/100;
@@ -936,13 +989,14 @@ $('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
 /* ---------- 표 ---------- */
 function renderTable(){
   const list=ui.tableAll?[...routes.values()].flat():routes.get(ui.route);
-  let h=`<thead><tr><th class="l">관로</th><th class="l">노선</th><th class="l">상류→하류</th><th>연장</th><th>관경</th><th>경사‰</th><th>INV 상</th><th>INV 하</th><th>GH 상</th><th>GH 하</th><th>누가인구</th><th>Q m³/s</th><th>Qfull</th><th>V m/s</th><th>h/D</th><th>사용률</th><th>토피 min</th><th class="l">판정</th><th class="l">토피·지장물</th></tr></thead><tbody>`;
-  list.forEach(p=>{const r=res.get(p.id);
+  let h=`<thead><tr><th class="l">관로</th><th class="l">노선</th><th class="l">상류→하류</th><th>연장</th><th>관경</th><th>경사‰</th><th>INV 상</th><th>INV 하</th><th>GH 상</th><th>GH 하</th><th class="l">공법</th><th>누가인구</th><th>Q m³/s</th><th>Qfull</th><th>V m/s</th><th>h/D</th><th>사용률</th><th>토피 min</th><th class="l">판정</th><th class="l">토피·지장물</th></tr></thead><tbody>`;
+  list.forEach(p=>{const r=res.get(p.id),chg=new Set(changedKeys(p)),cc=k=>chg.has(k)?' class="chg"':'';
     const inp=(k,v)=>`<input data-k="${k}" data-pid="${esc(p.id)}" value="${v}" inputmode="decimal" aria-label="${k}">`;
     h+=`<tr data-pid="${esc(p.id)}" class="${p.id===ui.sel?'sel':''}"><td class="l">${esc(p.id)}</td><td class="l">${esc(p.line)}</td><td class="l">${esc(p.up)}→${esc(p.dn)}</td><td>${p.L.toFixed(1)}</td>`+
-      `<td><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`+
-      `<td>${inp('S',r.S.toFixed(2))}</td><td>${inp('invUp',f2(p.invUp))}</td><td>${inp('invDn',f2(p.invDn))}</td><td>${inp('ghUp',f2(p.ghUp))}</td><td>${inp('ghDn',f2(p.ghDn))}</td>`+
-      `<td>${Math.round(r.pop).toLocaleString()}</td><td>${f4(r.Q)}</td><td>${f4(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.use)?(r.use*100).toFixed(0)+'%':'—'}</td><td style="${r.cmin<crit.cover?'color:var(--warn);font-weight:600':''}">${f2(r.cmin)}</td>`+
+      `<td${cc('D')}><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`+
+      `<td>${inp('S',r.S.toFixed(2))}</td><td${cc('invUp')}>${inp('invUp',f2(p.invUp))}</td><td${cc('invDn')}>${inp('invDn',f2(p.invDn))}</td><td${cc('ghUp')}>${inp('ghUp',f2(p.ghUp))}</td><td${cc('ghDn')}>${inp('ghDn',f2(p.ghDn))}</td>`+
+      `<td class="l${chg.has('code')?' chg':''}" title="${esc(codeName(p.code))}">${esc(p.code||'—')}${(p.st||[]).some(t=>(t.code??p.code)!==p.code)?'*':''}</td>`+
+      `<td>${Math.round(r.pop).toLocaleString()}</td><td>${f4(r.Q)}</td><td>${f4(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.use)?(r.use*100).toFixed(0)+'%':'—'}</td><td style="${r.coverNG?'color:var(--warn);font-weight:600':''}">${f2(r.cmin)}</td>`+
       `<td class="l"><span class="remark ${stCls(r.st)}">${r.rem.map(esc).join(' ')}</span></td><td class="l">${r.flags.map(x=>`<span class="flagtxt">${esc(x)}</span>`).join(' ')}</td></tr>`;});
   $('#tbl').innerHTML=h+'</tbody>';
 }
@@ -966,7 +1020,7 @@ $('#tAll').onclick=()=>{ui.tableAll=true;$('#tAll').classList.add('on');$('#tRou
 const setMode=l=>{ui.linked=l;$('#mLinked').classList.toggle('on',l);$('#mSingle').classList.toggle('on',!l);renderMbar();};
 $('#mLinked').onclick=()=>setMode(true);$('#mSingle').onclick=()=>setMode(false);
 $('#bUndo').onclick=doUndo;$('#bRedo').onclick=doRedo;
-$('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});selectRoute(routesOf(pipes).keys().next().value);};
+$('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});snapBase();selectRoute(routesOf(pipes).keys().next().value);};
 const CRIT_IDS={cVmin:'vmin',cVmax:'vmax',cVlow:'vlow',cCover:'cover',cClear:'clear'};
 Object.keys(CRIT_IDS).forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
   crit[CRIT_IDS[id]]=v;render();}));
@@ -1030,7 +1084,7 @@ function applyLoaded(np,warn,hydHead,name,profMap=new Map(),keepProf=false){
   const ids=new Set();np.forEach(p=>{if(ids.has(p.id))p.id=p.id+'·'+p.line;ids.add(p.id);});
   if(!keepProf){doc.profiles=profMap;}
   doc.hydHead=hydHead;doc.file=name;ui.range=null;
-  edit(()=>{pipes=np;ui.yFrame=null;});
+  edit(()=>{pipes=np;ui.yFrame=null;});snapBase();
   routes=routesOf(pipes);selectRoute(routes.keys().next().value);
   const nProf=doc.profiles.size;
   toast(`관로 ${np.length}개 · 종단파일 ${nProf}개 불러옴`+(warn.length?` · 확인 ${warn.length}건`:''));
