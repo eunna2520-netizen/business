@@ -352,21 +352,36 @@ function compute(pipes,crit){
     const a=acc(p),D=p.D/1000,nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
     const S=(p.invUp-p.invDn)/p.L;
     const margin=marginFor(p.D);
-    let u,adverse=S<=0;
-    if(adverse){const full=circ(D,2*Math.PI);u={h:D,V:Math.max(0.1,a.Q/nb/full.A),Qfull:0,Vfull:0,Afull:full.A,sur:true};}
+    // 압송관(비고 '압송'·'펌프'): 만관 압력흐름 V = Q/A, 유속·역구배·여유율 판정 없음 (PipeTools와 같음)
+    const pump=/압송|펌프/.test(String(p.note||''));
+    let u,adverse=!pump&&S<=0;
+    if(pump){const full=circ(D,2*Math.PI),g=uniform(D,0,Math.max(S,1e-6),n);u={h:D,V:a.Q/nb/full.A,Qfull:S>0?g.Qfull:0,Vfull:S>0?g.Vfull:0,Afull:full.A,sur:false};}
+    else if(adverse){const full=circ(D,2*Math.PI);u={h:D,V:a.Q/nb/full.A,Qfull:0,Vfull:0,Afull:full.A,sur:true};}
     else u=uniform(D,a.Q/nb,S,n);
     // PipeTools 방식: 허용유량 = 만관유량(원형관 허용수심비 1.0). 여유율은 따로 검토: Q×(1+여유율) ≤ Qfull
     const Qfull=u.Qfull*nb,Qallow=Qfull,qr=Qfull>0?a.Q/Qfull:Infinity,use=Qfull>0?a.Q*(1+margin)/Qfull:Infinity;
     const covUp=p.ghUp-p.invUp-D,covDn=p.ghDn-p.invDn-D;
     const rem=[];let st=0;
     const bump=s=>{if(s>st)st=s;};
-    if(adverse){rem.push('Adverse Slope');bump(2);}
+    // 유속 판정 (PipeTools 구분): 유량이 0이면 만관유속으로, 경사 100‰ 이상은 '구배10.0%이상'
+    let vLabel=null,marginOK=true;
+    if(pump){rem.push('압송관');}
+    else if(adverse){rem.push(S===0?'ZERO_SLOPE':'Adverse Slope');bump(2);vLabel='NG(V)0.3↓';marginOK=false;}
     else{
-      if(use>1){rem.push('NG_'+Math.round(use*100)+'%');bump(2);}
-      // 유량이 없는 관로(유량 자료 없음·최상류 무유입)는 유속 판정을 하지 않음
-      if(!(a.Q>0)){rem.push('Q=0');bump(1);}
-      else if(u.V<crit.vmin){rem.push('LESS'+u.V.toFixed(2));bump(u.V<(crit.vlow||0)?2:1);}
-      if(u.V>crit.vmax){rem.push('UPPR'+u.V.toFixed(2));bump(1);}
+      marginOK=use<=1;
+      if(!marginOK){rem.push('NG_'+Math.round(use*100)+'%');bump(2);}
+      const Vj=a.Q>0?u.V:u.Vfull;
+      if(Vj<(crit.vlow||0))vLabel='NG(V)0.3↓';
+      else if(Vj<crit.vmin)vLabel='유지관리';
+      else if(Vj>crit.vmax)vLabel='NG(V)3.0↑';
+      else vLabel='GOOD';
+      // 경사 100‰ 이상이면 유속 NG를 '구배10.0%이상'으로 (급경사라 유속 기준 대신 구배로 판단)
+      if(/^NG/.test(vLabel)&&S*1000>=(crit.smax??100))vLabel='구배10.0%이상';
+      if(!(a.Q>0))rem.push('Q=0');
+      if(vLabel==='구배10.0%이상'){rem.push('SLOPE'+(S*100).toFixed(1)+'%');bump(1);}
+      else if(vLabel==='NG(V)0.3↓'){rem.push((a.Q>0?'LESS':'Vfull')+Vj.toFixed(2)+(S*1000>=10&&a.Q>0?' S≥1%':''));bump(2);}
+      else if(vLabel==='유지관리'){rem.push((a.Q>0?'LESS':'Vfull')+Vj.toFixed(2));bump(1);}
+      else if(vLabel==='NG(V)3.0↑'){rem.push('UPPR'+Vj.toFixed(2));bump(2);}
     }
     const zAt=c=>p.invUp+(p.invDn-p.invUp)*c/p.L;
     // 토피 검토점: 상류단, 중간 측점, 하류단. 관보호공(-B) 구간의 점은 따로 센다
@@ -386,7 +401,7 @@ function compute(pipes,crit){
     const coverNG=cminU<crit.cover-0.0005,coverProt=!coverNG&&cmin<crit.cover-0.0005;
     if(coverNG)flags.unshift('COVER'+cminU.toFixed(2));
     else if(coverProt)flags.unshift('보호공'+cmin.toFixed(2));
-    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU,cminAll,qr});
+    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU,cminAll,qr,vLabel,marginOK,pump});
   });
   // 맨홀 접합 검토: 유입관 하류관저가 유출관 상류관저보다 낮으면 역류
   const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
@@ -1049,23 +1064,21 @@ $('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
 /* ---------- PipeTools 결과 비교 ---------- */
 const cmpOn=()=>ui.cmp&&doc.rpt.size>0;
 // 유속 판정 구분: PipeTools GOOD / 유지관리 / NG(V)
-const vClass=V=>V<crit.vlow?'NG':V<crit.vmin?'유지관리':V>crit.vmax?'NG':'GOOD';
-const ptVClass=s=>/NG/i.test(s)?'NG':/유지/.test(s)?'유지관리':/GOOD/i.test(s)?'GOOD':s;
 function cmpStats(){
   let n=0,dv=0,dh=0,dq=0,same=0,cov=0,mar=0;
   pipes.forEach(p=>{const t=doc.rpt.get(p.id),r=res.get(p.id);if(!t||!r||!isFinite(t.V))return;n++;
     dv=Math.max(dv,Math.abs(r.V-t.V));dh=Math.max(dh,Math.abs(r.h*1000-t.h*1000));
     if(t.Qfull>0)dq=Math.max(dq,Math.abs(r.Qfull*86400/t.Qfull-1));
-    if(vClass(r.V)===ptVClass(t.ckV))same++;
+    if((r.vLabel||'')===String(t.ckV||'').trim())same++;
     if(((r.coverNG||r.coverProt)?'NG':'GOOD')===String(t.ckC).trim())cov++;
-    if((r.use<=1?'GOOD':'NG')===(/GOOD/i.test(t.ckM)?'GOOD':'NG'))mar++;});
+    if((r.marginOK?'GOOD':'NG')===(/GOOD/i.test(t.ckM)?'GOOD':'NG'))mar++;});
   return{n,dv,dh,dq,same,cov,mar};
 }
 function cmpChip(){if(!doc.rpt.size)return'';const c=cmpStats();
   return `<button class="chip cmpchip${ui.cmp?' on':''}" id="cmpChip" title="불러온 PipeTools 계산결과(rpt)와 비교 · 누르면 비교 열 켜기/끄기">PipeTools 대비 ΔV≤${c.dv.toFixed(3)} · 판정 일치 여유율 ${c.mar}/${c.n} · 유속 ${c.same}/${c.n} · 토피 ${c.cov}/${c.n}</button>`;}
 function cmpCells(p,r){
   if(!cmpOn())return'';const t=doc.rpt.get(p.id);if(!t)return'<td class="cmp" colspan="6">—</td>';
-  const dv=r.V-t.V,dh=r.h*1000-t.h*1000,ok=vClass(r.V)===ptVClass(t.ckV);
+  const dv=r.V-t.V,dh=r.h*1000-(isFinite(t.h)?t.h*1000:r.h*1000),ok=(r.vLabel||'')===String(t.ckV||'').trim();
   const sg=(v,dp)=>{const t=v.toFixed(dp);return(/^-/.test(t)&&!/^-0\.0*$/.test(t)?'':'+')+t.replace(/^-(0\.0*)$/,'$1');};
   return `<td class="cmp">${t.V.toFixed(3)}</td><td class="cmp" style="${Math.abs(dv)>0.01?'color:var(--bad);font-weight:600':''}">${sg(dv,3)}</td>`+
     `<td class="cmp">${(t.h*1000).toFixed(1)}</td><td class="cmp">${sg(dh,1)}</td><td class="cmp">${ui.qd?t.Qfull.toFixed(1):(t.Qfull/86400).toFixed(4)}</td>`+
