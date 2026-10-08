@@ -363,7 +363,9 @@ function compute(pipes,crit){
     if(adverse){rem.push('Adverse Slope');bump(2);}
     else{
       if(use>1){rem.push('NG_'+Math.round(use*100)+'%');bump(2);}
-      if(u.V<crit.vmin){rem.push('LESS'+u.V.toFixed(2));bump(u.V<(crit.vlow||0)?2:1);}
+      // 유량이 없는 관로(유량 자료 없음·최상류 무유입)는 유속 판정을 하지 않음
+      if(!(a.Q>0)){rem.push('Q=0');bump(1);}
+      else if(u.V<crit.vmin){rem.push('LESS'+u.V.toFixed(2));bump(u.V<(crit.vlow||0)?2:1);}
       if(u.V>crit.vmax){rem.push('UPPR'+u.V.toFixed(2));bump(1);}
     }
     const zAt=c=>p.invUp+(p.invDn-p.invUp)*c/p.L;
@@ -441,15 +443,17 @@ PT.kind=rows=>{
 // 수리계산 시트 (TYPE 옵션 + 3행 제목 + 관로 1행 1개)
 PT.parseHyd=rows=>{
   const h=PT.findRow(rows,r=>r.includes('관번호')&&r.includes('상류맨홀'));
-  const errs=[],pipes=[],ids=new Set();let nPrev=0;
+  const errs=[],pipes=[],ids=new Set(),carry={n:0,C:0,dens:0,won:0,gwon:0,pf:1};
+  const type1=PT.norm((rows[h-2]||[])[0])==='TYPE1'?PT.num((rows[h-1]||[])[0]):1;
   for(let i=h+1;i<rows.length;i++){
     const c=rows[i]||[];if(!PT.norm(c[1]))continue;
     const num=k=>{const v=PT.num(c[k]);return isFinite(v)?v:0;};
     const p=rowToPipe(c.map(v=>v??''));
     ['L','area','W','D','nb','ghUp','ghDn','invUp','invDn','n','C','ext','tin','dens','won','gwon','pf','x1','y1','x2','y2'].forEach(k=>p[k]=num(COLS.indexOf(k)));
     ['line','id','up','dn','note','sect','ptype','obsStr','mhType','drop','vertex','layer'].forEach(k=>p[k]=String(c[COLS.indexOf(k)]??'').trim());
-    // PipeTools: 조도계수 빈칸은 윗행 값을 이어 씀
-    if(p.n>0)nPrev=p.n;else p.n=nPrev||0.013;
+    // PipeTools: 조도계수·유출계수·인구밀도·오수/지하 단위·P.F 빈칸은 윗행 값을 이어 씀 (보통 첫 행에만 입력)
+    ['n','C','dens','won','gwon','pf'].forEach(k=>{const raw=c[COLS.indexOf(k)];if(raw!==''&&raw!==null&&raw!==undefined&&isFinite(PT.num(raw)))carry[k]=p[k];else p[k]=carry[k];});
+    if(!(p.n>0))p.n=0.013;
     p.nb=p.nb||1;p.pf=p.pf||1;
     p.obs=PT.parseObsStr(p.obsStr);
     p.code=String(p.sect||'').split(',')[0].trim();
@@ -461,7 +465,7 @@ PT.parseHyd=rows=>{
     if(!(p.D>0))errs.push(`${at}: 관경(높이)이 0 이하`);
     ids.add(p.id);pipes.push(p);
   }
-  return{head:rows.slice(0,h+1),pipes,errs};
+  return{head:rows.slice(0,h+1),pipes,errs,type1};
 };
 // 수리계산 결과(rpt) 시트: 비교용으로 관로별 값만 읽는다 (유량 단위 ㎥/d)
 PT.parseRpt=rows=>{
@@ -485,15 +489,17 @@ PT.obsStr=obs=>obs.map(o=>[+o.off.toFixed(3),o.inv,o.size,o.name].join(',')).joi
 PT.parseProfile=rows=>{
   const h=PT.findRow(rows,r=>r.includes('누가거리')&&r.includes('관저고'));
   const hdr=(rows[h]||[]).map(PT.norm),col=(name,def)=>{const i=hdr.indexOf(name);return i>=0?i:def;};
-  const C={ch:col('누가거리',1),gh:col('지반고',2),inv:col('관저고',3),dia:col('관경',4),mh:col('맨홀',5),code:col('구간',8),x:col('X1',24),y:col('Y1',25)};
+  const C={ch:col('누가거리',1),gh:col('지반고',2),inv:col('관저고',3),dia:col('관경',4),mh:col('맨홀',5),code:col('구간',8),pid:col('관번호',14),x:col('X1',24),y:col('Y1',25)};
   const on=(rows[h-2]||[]).map(PT.norm),ov=rows[h-1]||[],opt={};on.forEach((k,i)=>{if(k)opt[k]=ov[i];});
   const stations=[];let i=h+1;
   for(;i<rows.length;i++){
     const r=rows[i]||[],ch=PT.num(r[C.ch]);
     if(!isFinite(ch)){if(PT.norm(r[C.ch])==='')continue;break;}
-    stations.push({row:i,raw:r.slice(),ch,gh:PT.num(r[C.gh]),inv:PT.num(r[C.inv]),dia:PT.num(r[C.dia]),mh:String(r[C.mh]??'').trim(),code:String(r[C.code]??'').trim(),P:PT.norm(r[0])==='P',x:PT.num(r[C.x]),y:PT.num(r[C.y])});
+    stations.push({row:i,raw:r.slice(),ch,gh:PT.num(r[C.gh]),inv:PT.num(r[C.inv]),dia:PT.num(r[C.dia]),mh:String(r[C.mh]??'').trim(),code:String(r[C.code]??'').trim(),pid:String(r[C.pid]??'').trim(),P:PT.norm(r[0])==='P',x:PT.num(r[C.x]),y:PT.num(r[C.y])});
   }
   const chainInt=PT.num(opt['chain'])||20;
+  // 측점 관저고 자릿수: 파일마다 2자리 또는 3자리
+  let dp=2;stations.forEach(s=>{if(s.mh||!isFinite(s.inv))return;const t=String(+s.inv.toFixed(6)).split('.')[1]||'';if(t.length>=3)dp=3;});
   const obs=[];let obsHead=-1;
   for(;i<rows.length;i++){const r=(rows[i]||[]).map(PT.norm);if(r.includes('측점')&&r.includes('INV')){obsHead=i;break;}}
   if(obsHead>=0)for(let k=obsHead+1;k<rows.length;k++){
@@ -502,21 +508,25 @@ PT.parseProfile=rows=>{
     const z=PT.size(r[3]);
     obs.push({row:k,ch,inv:PT.num(r[2]),...z,size:String(r[3]??'').trim(),name:String(r[4]??'').trim()});
   }
-  return{rows:rows.map(r=>(r||[]).slice()),h,C,opt,chainInt,line:String(opt['라인명']??'').trim()||'노선',ptype:String(opt['관종']??'').trim(),stations,obs};
+  return{rows:rows.map(r=>(r||[]).slice()),h,C,opt,chainInt,dp,line:String(opt['라인명']??'').trim()||'노선',ptype:String(opt['관종']??'').trim(),stations,obs};
 };
 // 종단파일 → 관로: 맨홀(맨홀 열이 채워진 측점) 사이마다 관로 1개
+// 맨홀 묶음: 같은 누가거리·같은 맨홀명 연속 두 행 = 단차 맨홀 (1행 유입관저, 2행 유출관저)
+PT.groups=prof=>{const g=[];prof.stations.forEach(s=>{if(!s.mh)return;const l=g[g.length-1];
+  if(l&&l.mh===s.mh&&Math.abs(l.ch-s.ch)<1e-6)l.out=s;else g.push({mh:s.mh,ch:s.ch,in:s,out:s});});return g;};
 PT.profileToPipes=(prof,line)=>{
-  const ms=prof.stations.filter(s=>s.mh),pipes=[];
+  const ms=PT.groups(prof),pipes=[];
   for(let k=0;k<ms.length-1;k++){
-    const a=ms[k],b=ms[k+1];
-    const mids=prof.stations.filter(s=>s.ch>a.ch&&s.ch<b.ch);
+    const A=ms[k],B=ms[k+1],a=A.out,b=B.in;
+    if(!(B.ch>A.ch))continue;
+    const mids=prof.stations.filter(s=>s.ch>A.ch&&s.ch<B.ch);
     const n=prof.ptype==='PE'?0.010:0.013;
-    pipes.push({line:line||prof.line,id:a.mh,up:a.mh,dn:b.mh,L:+(b.ch-a.ch).toFixed(3),area:0,W:0,D:a.dia||200,nb:1,
+    pipes.push({line:line||prof.line,id:a.pid||A.mh,up:A.mh,dn:B.mh,L:+(B.ch-A.ch).toFixed(3),area:0,W:0,D:a.dia||200,nb:1,
       ghUp:a.gh,ghDn:b.gh,invUp:a.inv,invDn:b.inv,n,C:0,ext:0,tin:0,note:'',dens:0,won:0,gwon:0,pf:1,
       x1:a.x,y1:a.y,x2:b.x,y2:b.y,sect:'',ptype:prof.ptype,obsStr:'',mhType:'',drop:'',vertex:'',layer:'',
-      code:a.code,st:mids.map(s=>({c:+(s.ch-a.ch).toFixed(3),g:s.gh,x:s.x,y:s.y,P:s.P,code:s.code})),
-      obs:prof.obs.filter(o=>o.ch>=a.ch&&o.ch<b.ch).map(o=>({...o,off:o.ch-a.ch})),
-      prof:{a:a.mh,b:b.mh}});
+      code:a.code,st:mids.map(s=>({c:+(s.ch-A.ch).toFixed(3),g:s.gh,x:s.x,y:s.y,P:s.P,code:s.code})),
+      obs:prof.obs.filter(o=>o.ch>=A.ch&&o.ch<B.ch).map(o=>({...o,off:o.ch-A.ch})),
+      prof:{a:A.mh,b:B.mh,pid:a.pid}});
   }
   return pipes;
 };
@@ -527,7 +537,8 @@ PT.merge=(geo,hyd,used=new Set(),allowOrder=true)=>{
   const free=hyd.filter(p=>!used.has(p));
   let byOrder=0;const warn=[];
   const out=geo.map((g,i)=>{
-    let h=near(g.x1,g.y1);
+    let h=g.prof?.pid?hyd.find(p=>!used.has(p)&&p.id===g.prof.pid):null;
+    if(!h)h=near(g.x1,g.y1);
     if(!h&&allowOrder&&free.length===geo.length&&!used.has(free[i])){h=free[i];byOrder++;}
     if(!h)return g;
     used.add(h);
@@ -548,25 +559,40 @@ PT.fmt=v=>v===null||v===undefined?'':typeof v==='number'?String(+v.toFixed(6)):S
 PT.toTSV=rows=>rows.map(r=>{const a=(r||[]).map(PT.fmt);while(a.length&&a[a.length-1]==='')a.pop();return a.join('\t');}).join('\n');
 // 수정된 관저·지반·관경을 원래 종단파일 행에 되돌려 쓴다. 측점 사이 관저고는 맨홀 사이 직선 보간.
 PT.exportProfile=(prof,route)=>{
-  const rows=prof.rows.map(r=>r.slice()),C=prof.C;
-  const pm=new Map(route.filter(p=>p.prof).map(p=>[p.prof.a,p]));
-  const ms=prof.stations.filter(s=>s.mh);
-  // PipeTools는 측점 관저고를 소수 2자리로 기록 (맨홀은 입력값 그대로)
-  const set=(r,c,v,old,dp=3)=>{if(!isFinite(v))return;v=+v.toFixed(dp);if(isFinite(old)&&Math.abs(v-old)<0.0005)return;rows[r][c]=v;};
-  prof.stations.forEach(s=>{
-    let k=-1;for(let j=0;j<ms.length-1;j++)if(s.ch>=ms[j].ch&&s.ch<ms[j+1].ch){k=j;break;}
-    const last=ms[ms.length-1];
-    if(k<0&&s===last){const p=pm.get(ms[ms.length-2]?.mh);if(p){set(s.row,C.inv,p.invDn,s.inv);set(s.row,C.gh,p.ghDn,s.gh);set(s.row,C.dia,p.D,s.dia);}return;}
-    if(k<0)return;
-    const p=pm.get(ms[k].mh);if(!p)return;
-    const c=s.ch-ms[k].ch;
-    set(s.row,C.inv,p.invUp+(p.invDn-p.invUp)*c/p.L,s.inv,s.mh?3:2);
-    set(s.row,C.dia,p.D,s.dia);
-    if(s.mh)set(s.row,C.gh,p.ghUp,s.gh);
-    const code=s.mh?p.code:(p.st||[]).find(t=>Math.abs(t.c-c)<1e-6)?.code;
-    if(code!==undefined&&code!==s.code)rows[s.row][C.code]=code;
+  const C=prof.C,grp=PT.groups(prof);
+  const outP=new Map(route.filter(p=>p.prof).map(p=>[p.prof.a,p])),inP=new Map(route.filter(p=>p.prof).map(p=>[p.prof.b,p]));
+  // 값이 실제로 바뀐 칸만 덮어쓴다 (원래 값의 자릿수·반올림을 건드리지 않도록)
+  const put=(row,c,v,old,dp=3)=>{if(!isFinite(v))return;if(isFinite(old)&&Math.abs(v-old)<1e-6)return;v=+(+v).toFixed(dp);if(isFinite(old)&&Math.abs(v-old)<1e-9)return;row[c]=v;};
+  const byRow=new Map();
+  grp.forEach(G=>{const pi=inP.get(G.mh),po=outP.get(G.mh);
+    if(G.in!==G.out){byRow.set(G.in.row,{t:'in',G,pi,po});byRow.set(G.out.row,{t:'out',G,pi,po});}
+    else byRow.set(G.in.row,{t:'one',G,pi,po});});
+  const stByRow=new Map(prof.stations.filter(s=>!s.mh).map(s=>[s.row,s]));
+  const out=[];
+  prof.rows.forEach((r0,i)=>{
+    const r=r0.slice(),h=byRow.get(i);
+    if(h){
+      const s=h.t==='out'?h.G.out:h.G.in;
+      const setIn=(row,p)=>{put(row,C.inv,p.invDn,s.inv);put(row,C.gh,p.ghDn,s.gh);};
+      const setOut=(row,p)=>{put(row,C.inv,p.invUp,s.inv);put(row,C.gh,p.ghUp,s.gh);if(isFinite(s.dia))put(row,C.dia,p.D,s.dia);if(p.code!==undefined&&p.code!==s.code)row[C.code]=p.code;};
+      if(h.t==='in'){if(h.pi)setIn(r,h.pi);out.push(r);return;}
+      if(h.t==='out'){if(h.po)setOut(r,h.po);out.push(r);return;}
+      // 한 행짜리 맨홀에서 유입·유출 관저가 달라지면 같은 맨홀 행을 하나 더 넣어 단차로 기록
+      if(h.pi&&h.po&&Math.abs(h.pi.invDn-h.po.invUp)>0.0005){const r2=r.slice();setIn(r,h.pi);setOut(r2,h.po);out.push(r,r2);return;}
+      if(h.po)setOut(r,h.po);else if(h.pi)setIn(r,h.pi);
+      out.push(r);return;
+    }
+    const s=stByRow.get(i);
+    if(s){let gi=-1;grp.forEach((g,k)=>{if(g.ch<=s.ch+1e-9)gi=k;});const G=grp[gi],N=grp[gi+1],p=G&&outP.get(G.mh);
+      if(p&&N&&s.ch<N.ch-1e-9){const c=s.ch-G.ch;
+        // 측점 관저 = 원래 값 + 양 끝 관저 변화량의 보간 (곡관·압송관처럼 직선이 아닌 종단도 모양 유지). 빈칸은 빈칸 그대로
+        const dU=p.invUp-G.out.inv,dD=p.invDn-N.in.inv;
+        if(isFinite(s.inv)&&(Math.abs(dU)>1e-6||Math.abs(dD)>1e-6))put(r,C.inv,s.inv+dU+(dD-dU)*c/(N.ch-G.ch),s.inv,prof.dp||2);
+        if(isFinite(s.dia))put(r,C.dia,p.D,s.dia);
+        const code=(p.st||[]).find(t=>Math.abs(t.c-c)<1e-6)?.code;if(code!==undefined&&code!==s.code)r[C.code]=code;}}
+    out.push(r);
   });
-  return rows;
+  return out;
 };
 // 종단파일이 없는 노선은 새로 만든다 (맨홀 + chain 간격 측점)
 PT.newProfile=(route,line,chainInt=20)=>{
@@ -1125,6 +1151,8 @@ function loadSheets(sheets,opt={}){
   if(!profs.length&&!hyds.length)return{errs:['종단파일(누가거리·관저고 제목) 또는 수리계산 시트(관 번 호·상류맨홀 제목)를 찾지 못했습니다.']};
   hyds.forEach(x=>errs.push(...x.h.errs.map(e=>`[${x.name}] ${e}`)));
   if(errs.length)return{errs};
+  if(hyds.length>1){warn.push(`수리계산 시트가 ${hyds.length}개 있어 첫 번째 '${hyds[0].name}'만 사용 (나머지: ${hyds.slice(1).map(x=>x.name).join(', ')})`);hyds.length=1;}
+  if(hyds[0]&&hyds[0].h.type1>1)warn.push(`TYPE1=${hyds[0].h.type1} (${hyds[0].h.type1===2?'우수':'합류'}) 자료입니다. 지금은 오수 원단위식만 계산하므로 우수량은 0으로 계산됩니다.`);
   let hyd=hyds.flatMap(x=>x.h.pipes);
   const fromCurrent=!hyd.length&&opt.keepHyd;
   if(fromCurrent)hyd=clone(pipes);
