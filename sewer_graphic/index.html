@@ -98,6 +98,16 @@ td select{width:auto}
 .rainform{display:grid;grid-template-columns:auto 1fr 1fr;gap:4px 8px;align-items:center;font-size:12.5px;margin-top:8px}
 .rainform input{width:100%;border:1px solid var(--line);border-radius:5px;padding:3px 6px;background:var(--panel2);font-family:var(--mono);text-align:right;font-size:12.5px;min-width:0}
 .rainform .hd{color:var(--muted);font-size:11.5px;text-align:center}
+.capchart{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:3px 10px;align-items:center;font-size:12px}
+.capchart .nm{font-family:var(--mono);white-space:nowrap;cursor:pointer}
+.capchart .nm.sel{color:var(--accent);font-weight:600}
+.capchart .tr{position:relative;height:14px;background:var(--panel2);border-radius:3px;cursor:pointer;min-width:0}
+.capchart .bar{position:absolute;left:0;top:2px;bottom:2px;border-radius:0 3px 3px 0}
+.capchart .lim{position:absolute;top:-2px;bottom:-2px;width:0;border-left:2px dashed var(--ink);opacity:.55}
+.capchart .full{position:absolute;top:-2px;bottom:-2px;width:0;border-left:1px solid var(--muted)}
+.capchart .val{font-family:var(--mono);text-align:right;white-space:nowrap}
+.capchart .axis{grid-column:2;position:relative;height:14px;font-size:10px;color:var(--muted)}
+.capchart .axis span{position:absolute;transform:translateX(-50%)}
 .methodbox{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px;font-size:13px}
 .methodbox select{border:1px solid var(--line);border-radius:5px;background:var(--panel2);padding:4px 6px;flex:1;min-width:0}
 .mrow2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -195,6 +205,7 @@ button,.tab{touch-action:manipulation}
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
           <button id="bRange" title="두 맨홀 사이 관저를 한 경사로 일직선 정리">구간 일직선</button>
+          <div class="seg" role="group" aria-label="표시"><button id="vVel" class="on" title="관 위 표시: 실유속">유속</button><button id="vCap" title="관 위 표시: 유량비 Q/Qfull">통수능</button></div>
           <div class="seg" role="group" aria-label="가로 축척"><button id="zOut" aria-label="축소">－</button><button id="zFit" title="노선 전체를 화면에">전체</button><button id="zIn" aria-label="확대">＋</button></div>
           <div class="sp"></div>
           <div class="hint touch-only">관저 점을 눌러 선택 → 위아래로 끌거나 하단 버튼(길게 누르면 연속)으로 조정 · 좌우로 밀면 종단 스크롤</div>
@@ -212,6 +223,11 @@ button,.tab{touch-action:manipulation}
         </div>
         <div class="scroll" id="profWrap"><svg id="prof" aria-label="종단면도"></svg></div>
       </div>
+      <div class="card">
+        <div class="card-h"><h2>통수능 검토</h2><span class="hint" id="capNote"></span><div class="sp"></div>
+          <div class="legend"><span><i style="background:var(--good)"></i>여유 있음</span><span><i style="background:var(--warn)"></i>한계의 90% 이상</span><span><i style="background:var(--bad)"></i>여유율 부족</span></div></div>
+        <div id="capChart" class="capchart"></div>
+      </div>
     </div>
 
     <div class="col">
@@ -222,6 +238,7 @@ button,.tab{touch-action:manipulation}
         <div style="height:10px"></div>
         <div class="btns">
           <button id="bFitV" title="유속이 최소유속 이상이 되는 최소 경사로 하류 관저고 조정">최소유속 경사 맞춤</button>
+          <button id="bFitQ" title="여유율을 만족하는 최소 경사로 하류 관저고 조정 (만관유량은 경사의 제곱근에 비례)">통수능 경사 맞춤</button>
           <button id="bAutoD" title="현재 경사에서 여유율을 만족하는 최소 관경">관경 자동</button>
           <button id="bDUp">관경 ▲</button><button id="bDDn">관경 ▼</button>
         </div>
@@ -745,7 +762,7 @@ function changeList(){const out=[];const nm={invUp:'상류관저',invDn:'하류�
 let pipes=SAMPLE.map(rowToPipe);
 snapBase();
 let res=null,routes=null;
-const ui={route:'본선',sel:'P-03',handle:{pid:'P-03',end:'dn'},linked:true,tableAll:false,yFrame:null,range:null,qd:false,cmp:false};
+const ui={route:'본선',sel:'P-03',handle:{pid:'P-03',end:'dn'},linked:true,tableAll:false,yFrame:null,range:null,qd:false,cmp:false,view:'vel'};
 const undo=[],redo=[];
 let drag=null;
 
@@ -775,7 +792,7 @@ function render(){
   applyRange();
   if(!P(ui.sel)){ui.sel=routes.get(ui.route)[0].id;ui.handle=null;}
   res=compute(pipes,crit,doc.rain);
-  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();renderRangeBar();renderRain();
+  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();renderRangeBar();renderRain();renderCap();
   $('#subTitle').textContent=`오수 원단위식 · Manning 등류 · ${doc.file||'가상 예제 관망 (본선 + 분기 3개)'}`;
   $('#uS').classList.toggle('on',!ui.qd);$('#uD').classList.toggle('on',ui.qd);
   $('#bUndo').disabled=!undo.length;$('#bRedo').disabled=!redo.length;
@@ -899,7 +916,7 @@ function renderProfile(){
   const fitW=Math.max(760,wrap.clientWidth),avgL=g.total/g.ch.length;
   const fitPx=(fitW-PROF.L0-20-PROF.R0)/g.total;
   const pxm=ui.hz||Math.max(fitPx,Math.min(3,70/avgL));ui.pxm=pxm;ui.fitPx=fitPx;
-  const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정','공법'];
+  const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm',ui.view==='cap'?'유량비 %':'유속 m/s','판정','공법'];
   const bandTop=top+PH+22,H=bandTop+bandRows.length*row+6;
   svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   if(!ui.yFrame||!drag){
@@ -946,14 +963,14 @@ function renderProfile(){
   // 관로 + 수면 + 라벨
   g.ch.forEach((p,i)=>{
     const r=res.get(p.id),D=secH(p),x1=X(g.cs[i])+MW/2,x2=X(g.cs[i+1])-MW/2,sel=p.id===ui.sel;
-    const c=`var(--${stCls(r.st)})`;
+    const cap=ui.view==='cap',c=`var(--${stCls(cap?capSt(r):r.st)})`;
     h+=`<polygon class="pb" data-pid="${esc(p.id)}" data-end="body" points="${x1},${Y(p.invUp)} ${x2},${Y(p.invDn)} ${x2},${Y(p.invDn+D)} ${x1},${Y(p.invUp+D)}" fill="var(--pipe-fill)" stroke="${sel?'var(--accent)':'var(--pipe)'}" stroke-width="${sel?2:1.2}"/>`;
     const hh=Math.min(r.h,D);
     if(hh>0)h+=`<polygon points="${x1},${Y(p.invUp)} ${x2},${Y(p.invDn)} ${x2},${Y(p.invDn+hh)} ${x1},${Y(p.invUp+hh)}" fill="var(--sewage-fill)" opacity=".85" pointer-events="none"/>`+
       `<line x1="${x1}" y1="${Y(p.invUp+hh)}" x2="${x2}" y2="${Y(p.invDn+hh)}" stroke="var(--sewage)" stroke-width="1.4" pointer-events="none"/>`;
     const mx=(x1+x2)/2,cy=Y((p.invUp+p.invDn)/2+D);
-    const vt=`V ${r.V.toFixed(2)}`;
-    if(x2-x1>=64)h+=`<g pointer-events="none"><rect x="${mx-30}" y="${cy-40}" width="60" height="17" rx="8.5" fill="${c}"/>`+
+    const vt=cap?(r.pump?'압송':isFinite(r.qr)?`Q/Qf ${(r.qr*100).toFixed(0)}%`:'역구배'):`V ${r.V.toFixed(2)}`;
+    if(x2-x1>=64)h+=`<g pointer-events="none"><rect x="${mx-(cap?36:30)}" y="${cy-40}" width="${cap?72:60}" height="17" rx="8.5" fill="${c}"/>`+
        `<text x="${mx}" y="${cy-28}" font-size="11" font-weight="600" text-anchor="middle" fill="var(--panel)">${vt}</text>`+
        `<text x="${mx}" y="${cy-9}" font-size="10" text-anchor="middle" fill="var(--ink)">${secLabel(p)} · ${r.S.toFixed(2)}‰</text></g>`;
   });
@@ -1024,7 +1041,7 @@ function renderProfile(){
     const r=res.get(p.id),x=(X(g.cs[i])+X(g.cs[i+1]))/2,c=`var(--${stCls(r.st)})`;
     const rem=r.rem[0];
     const sw=X(g.cs[i+1])-X(g.cs[i]);if(sw<36)return;
-    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,isBox(p)?secLabel(p).slice(1):p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600))+
+    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,isBox(p)?secLabel(p).slice(1):p.D+(p.nb>1?`×${p.nb}`:''))+(ui.view==='cap'?T(x,7,isFinite(r.qr)?(r.qr*100).toFixed(1):'—',`var(--${stCls(capSt(r))})`,600):T(x,7,r.V.toFixed(2),c,600))+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600))+
       (sw>=(p.code||'').length*6.4+4?T(x,9,esc(p.code||'')+((p.st||[]).some(t=>(t.code??p.code)!==p.code)?'*':''),isProt(p.code)?'var(--accent)':'var(--muted)',isProt(p.code)?600:400):'');
   });
   svg.innerHTML=h;
@@ -1146,6 +1163,12 @@ function renderSection(){
 function setCode(pid,code){const p=P(pid);edit(()=>{p.code=code;(p.st||[]).forEach(t=>{t.code=code;});});}
 $('#mCode').onchange=()=>{const v=$('#mCode').value;setCode(ui.sel,v?v+($('#mProt').checked?'-B':''):'');};
 $('#mProt').onchange=()=>{const b=$('#mCode').value||codeBase(P(ui.sel).code);if(!b){toast('먼저 굴착 공법을 고르세요');$('#mProt').checked=false;return;}setCode(ui.sel,b+($('#mProt').checked?'-B':''));};
+$('#bFitQ').onclick=()=>{const p=P(ui.sel),r=res.get(p.id);
+  if(r.pump){toast('압송관은 통수능 경사 검토를 하지 않습니다');return;}
+  if(!(r.Q>0)){toast('유량이 없어 통수능 경사를 정할 수 없습니다');return;}
+  const nb=Math.max(1,+p.nb||1),Q1=flowSec(p,0,1,+p.n||0.013).Qfull*nb;   // 경사 1일 때 만관유량
+  const S=Math.pow(r.Q*(1+r.margin)/Q1,2),target=Math.floor((p.invUp-S*p.L)*100)/100;
+  edit(()=>shiftEnd(p.id,'dn',target-p.invDn,ui.linked));toast(`${p.id} 하류관저 ${f2(target)} (S ${((p.invUp-target)/p.L*1000).toFixed(2)}‰ · 필요 ${(S*1000).toFixed(2)}‰)`);};
 $('#bFitV').onclick=()=>{const p=P(ui.sel),r=res.get(p.id);
   const S=slopeForV(p,r.Q,crit.vmin+0.005);
   const target=Math.floor((p.invUp-S*p.L)*100)/100;
@@ -1156,6 +1179,28 @@ $('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;if(isBox(p)){toast('BOX 암
   edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
 const stepD=k=>{const p=P(ui.sel);if(isBox(p)){toast('BOX 암거는 관경 단계 변경을 지원하지 않습니다');return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
 $('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
+
+/* ---------- 통수능 ---------- */
+// 여유율 한계 = 1/(1+여유율). 유량비가 한계를 넘으면 불량, 한계의 90% 이상이면 주의
+const capLimit=r=>1/(1+(r.margin||0));
+const capSt=r=>r.pump?0:!r.marginOK?2:(isFinite(r.qr)&&r.qr>=capLimit(r)*0.9?1:0);
+function renderCap(){
+  const ch=routes.get(ui.route)||[],rs=ch.map(p=>res.get(p.id));
+  const mx=Math.max(1.2,...rs.map(r=>isFinite(r.qr)?r.qr:0))*1.05,pc=v=>Math.min(100,v/mx*100);
+  const lims=[...new Set(rs.map(r=>Math.round(capLimit(r)*100)))];
+  $('#capNote').textContent=`  유량비 Q/Qfull · 점선 = 여유율 한계 (${lims.map(v=>v+'%').join(', ')})`;
+  let h='';
+  ch.forEach((p,i)=>{const r=rs[i],cs=capSt(r),q=isFinite(r.qr)?r.qr:mx;
+    h+=`<div class="nm${p.id===ui.sel?' sel':''}" data-pid="${esc(p.id)}">${esc(p.id)} <span style="color:var(--muted)">${esc(secLabel(p))}</span></div>`+
+       `<div class="tr" data-pid="${esc(p.id)}" title="${esc(p.id)} 유량비 ${isFinite(r.qr)?(r.qr*100).toFixed(1)+'%':'역구배'} / 한계 ${(capLimit(r)*100).toFixed(0)}%"><div class="bar" style="width:${pc(q)}%;background:var(--${['good','warn','bad'][cs]})"></div>`+
+       `<div class="lim" style="left:${pc(capLimit(r))}%"></div><div class="full" style="left:${pc(1)}%"></div></div>`+
+       `<div class="val">${r.pump?'압송':isFinite(r.qr)?(r.qr*100).toFixed(1)+'%':'역구배'}</div>`;});
+  h+=`<div></div><div class="axis">${[0,0.5,1].filter(v=>v<=mx).map(v=>`<span style="left:${pc(v)}%">${v*100}%</span>`).join('')}</div><div></div>`;
+  $('#capChart').innerHTML=h;
+}
+$('#capChart').addEventListener('click',e=>{const t=e.target.closest('[data-pid]');if(!t)return;ui.sel=t.dataset.pid;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();});
+const setView=v=>{ui.view=v;$('#vVel').classList.toggle('on',v!=='cap');$('#vCap').classList.toggle('on',v==='cap');render();};
+$('#vVel').onclick=()=>setView('vel');$('#vCap').onclick=()=>setView('cap');
 
 /* ---------- 강우강도 패널 ---------- */
 function renderRain(){
@@ -1448,7 +1493,7 @@ function renderMbar(){
   if(!hd){$('#mSel').textContent='관저 점을 선택하세요';$('#mInfo').textContent='';$('#mInv').innerHTML='—';return;}
   const r=res.get(hd.id),node=ui.handle.end==='up'?hd.up:hd.dn,z=ui.handle.end==='up'?hd.invUp:hd.invDn;
   $('#mSel').textContent=`${hd.id} ${ui.handle.end==='up'?'상류단':'하류단'} · ${node}`;
-  $('#mInfo').innerHTML=`S ${r.S.toFixed(2)}‰ · V ${r.V.toFixed(2)} · <span class="remark ${stCls(r.st)}">${esc(r.rem.join(' '))}</span>${r.coverNG?` <span class="flagtxt">토피 ${f2(r.cmin)}</span>`:''}`;
+  $('#mInfo').innerHTML=`S ${r.S.toFixed(2)}‰ · V ${r.V.toFixed(2)} · Q/Qf ${isFinite(r.qr)?(r.qr*100).toFixed(0)+'%':'—'} · <span class="remark ${stCls(r.st)}">${esc(r.rem.join(' '))}</span>${r.coverNG?` <span class="flagtxt">토피 ${f2(r.cmin)}</span>`:''}`;
   $('#mInv').innerHTML=`${f2(z)}<small>관저고 (m)</small>`;
 }
 $('#mPrev').onclick=()=>moveHandle(-1);
