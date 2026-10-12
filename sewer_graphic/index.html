@@ -802,7 +802,7 @@ PT.exportHyd=(pipes,head)=>{
   return top.concat(pipes.map(p=>{
     const r=p.raw?p.raw.slice():COLS.map(k=>p[k]??'');
     while(r.length<COLS.length)r.push('');
-    (p.raw?['L','D','ghUp','ghDn','invUp','invDn']:['line','id','up','dn','L','D','ghUp','ghDn','invUp','invDn']).forEach(k=>{const i=COLS.indexOf(k),v=p[k];
+    (p.raw?['L','D','ghUp','ghDn','invUp','invDn',...(+p.W>0||isFinite(PT.num(p.raw[COLS.indexOf('W')]))?['W']:[])]:['line','id','up','dn','L','D','ghUp','ghDn','invUp','invDn']).forEach(k=>{const i=COLS.indexOf(k),v=p[k];
       if(typeof v==='number'){if(!(isFinite(PT.num(r[i]))&&Math.abs(PT.num(r[i])-v)<0.0005))r[i]=+v.toFixed(3);}else r[i]=v;});
     // 수리시트 AA(구간) = "공법코드,연장"
     const ai=COLS.indexOf('sect');if(p.code&&String(r[ai]).split(',')[0].trim()!==p.code)r[ai]=`${p.code},${+(+p.L).toFixed(3)}`;
@@ -819,10 +819,10 @@ const clone=o=>JSON.parse(JSON.stringify(o));
 const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,clear:0.3,coverMode:'pt'};
 const doc={profiles:new Map(),hydHead:null,file:'',base:new Map(),rpt:new Map(),rain:null};
 // 불러온 시점 값 (변경 추적용)
-const BASE_KEYS=['invUp','invDn','ghUp','ghDn','D','code'];
+const BASE_KEYS=['invUp','invDn','ghUp','ghDn','D','W','code'];
 function snapBase(){doc.base=new Map(pipes.map(p=>[p.id,Object.fromEntries(BASE_KEYS.map(k=>[k,p[k]??'']))]));}
 function changedKeys(p){const b=doc.base.get(p.id);if(!b)return BASE_KEYS.slice();return BASE_KEYS.filter(k=>typeof b[k]==='number'?Math.abs((+p[k])-b[k])>0.0005:String(p[k]??'')!==String(b[k]));}
-function changeList(){const out=[];const nm={invUp:'상류관저',invDn:'하류관저',ghUp:'상류지반',ghDn:'하류지반',D:'관경',code:'공법'};
+function changeList(){const out=[];const nm={invUp:'상류관저',invDn:'하류관저',ghUp:'상류지반',ghDn:'하류지반',D:'관경(높이)',W:'폭',code:'공법'};
   pipes.forEach(p=>{const b=doc.base.get(p.id);changedKeys(p).forEach(k=>out.push(`${p.id}  ${nm[k]}  ${b?b[k]:'(새 관로)'} → ${p[k]}`));});return out;}
 let pipes=SAMPLE.map(rowToPipe);
 snapBase();
@@ -1248,11 +1248,21 @@ $('#bFitV').onclick=()=>{const p=P(ui.sel),r=res.get(p.id);
   const S=slopeForV(p,r.Q,crit.vmin+0.005);
   const target=Math.floor((p.invUp-S*p.L)*100)/100;
   edit(()=>shiftEnd(p.id,'dn',target-p.invDn,ui.linked));toast(`${p.id} 하류관저 ${f2(target)} (S ${((p.invUp-target)/p.L*1000).toFixed(2)}‰)`);};
-$('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;if(isBox(p)){toast('BOX 암거는 관경 자동 선택을 지원하지 않습니다');return;}let pick=DIAS[DIAS.length-1];
+$('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;
+  if(isBox(p)){   // 폭·높이 비율을 유지하며 0.1 m 단위로 여유율을 만족하는 최소 크기
+    const ow=+p.W,oh=+p.D,ratio=ow/oh;let pick=null;
+    for(let H=0.5;H<=6.0001;H+=0.1){p.D=+H.toFixed(2);p.W=+(H*ratio).toFixed(2);const r=compute(pipes,crit,doc.rain).get(p.id);if(r.use<=1){pick={H:p.D,W:p.W};break;}}
+    p.D=oh;p.W=ow;
+    if(!pick){toast('6.0 m 이하에서는 여유율을 만족하는 크기가 없습니다');return;}
+    if(pick.H===oh&&pick.W===ow){toast('현재 크기가 최소 적합 크기입니다');return;}
+    edit(()=>{p.D=pick.H;p.W=pick.W;});toast(`${p.id} ${ow.toFixed(2)}×${oh.toFixed(2)} → ${pick.W.toFixed(2)}×${pick.H.toFixed(2)} m`);return;}
+  let pick=DIAS[DIAS.length-1];
   for(const d of DIAS){p.D=d;const r=compute(pipes,crit,doc.rain).get(p.id);if(r.use<=1){pick=d;break;}}
   p.D=orig;if(pick===orig){toast('현재 관경이 최소 적합 관경입니다');return;}
   edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
-const stepD=k=>{const p=P(ui.sel);if(isBox(p)){toast('BOX 암거는 관경 단계 변경을 지원하지 않습니다');return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
+const stepD=k=>{const p=P(ui.sel);
+  if(isBox(p)){   // 폭과 높이를 같이 0.1 m씩 (폭·높이는 표에서 직접 입력도 가능)
+    const H=Math.max(0.3,+(+p.D+0.1*k).toFixed(2)),W=Math.max(0.3,+(+p.W+0.1*k).toFixed(2));edit(()=>{p.D=H;p.W=W;});return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
 $('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
 
 /* ---------- 통수능 ---------- */
@@ -1362,7 +1372,7 @@ function renderTable(){
   list.forEach(p=>{const r=res.get(p.id),chg=new Set(changedKeys(p)),cc=k=>chg.has(k)?' class="chg"':'';
     const inp=(k,v)=>`<input data-k="${k}" data-pid="${esc(p.id)}" value="${v}" inputmode="decimal" aria-label="${k}">`;
     h+=`<tr data-pid="${esc(p.id)}" class="${p.id===ui.sel?'sel':''}"><td class="l">${esc(p.id)}</td><td class="l">${esc(p.line)}</td><td class="l">${esc(p.up)}→${esc(p.dn)}</td><td>${p.L.toFixed(1)}</td>`+
-      (isBox(p)?`<td class="l">${secLabel(p)}</td>`:`<td${cc('D')}><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`)+
+      (isBox(p)?`<td class="l${chg.has('D')||chg.has('W')?' chg':''}" style="white-space:nowrap"><input data-k="W" data-pid="${esc(p.id)}" value="${(+p.W).toFixed(2)}" inputmode="decimal" aria-label="폭 m" style="width:52px"> × <input data-k="D" data-pid="${esc(p.id)}" value="${(+p.D).toFixed(2)}" inputmode="decimal" aria-label="높이 m" style="width:52px"></td>`:`<td${cc('D')}><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`)+
       `<td>${inp('S',r.S.toFixed(2))}</td><td${cc('invUp')}>${inp('invUp',f2(p.invUp))}</td><td${cc('invDn')}>${inp('invDn',f2(p.invDn))}</td><td${cc('ghUp')}>${inp('ghUp',f2(p.ghUp))}</td><td${cc('ghDn')}>${inp('ghDn',f2(p.ghDn))}</td>`+
       `<td class="l${chg.has('code')?' chg':''}" title="${esc(codeName(p.code))}">${esc(p.code||'—')}${(p.st||[]).some(t=>(t.code??p.code)!==p.code)?'*':''}</td>`+
       (r.storm?`<td>${r.A.toFixed(2)}</td><td>${r.Cavg.toFixed(3)}</td><td>${r.R.toFixed(2)}</td><td>${r.I.toFixed(2)}</td>`:`<td>${Math.round(r.pop).toLocaleString()}</td>`)+`<td>${fq(r.Q)}</td><td>${fq(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.qr)?(r.qr*100).toFixed(1)+'%':'—'}</td><td style="${r.coverNG?'color:var(--warn);font-weight:600':''}">${f2(r.cmin)}</td>`+
