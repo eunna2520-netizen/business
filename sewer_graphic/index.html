@@ -95,6 +95,9 @@ td select{width:auto}
 .tblwrap{overflow:auto;max-height:420px}
 .filebtn{display:inline-flex;align-items:center;background:var(--accent);color:var(--panel);border:1px solid var(--accent);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;touch-action:manipulation}
 .filebtn:focus-within,.filebtn:hover{filter:brightness(1.08)}
+.rainform{display:grid;grid-template-columns:auto 1fr 1fr;gap:4px 8px;align-items:center;font-size:12.5px;margin-top:8px}
+.rainform input{width:100%;border:1px solid var(--line);border-radius:5px;padding:3px 6px;background:var(--panel2);font-family:var(--mono);text-align:right;font-size:12.5px;min-width:0}
+.rainform .hd{color:var(--muted);font-size:11.5px;text-align:center}
 .methodbox{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:6px;font-size:13px}
 .methodbox select{border:1px solid var(--line);border-radius:5px;background:var(--panel2);padding:4px 6px;flex:1;min-width:0}
 .mrow2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -135,7 +138,7 @@ button,.tab{touch-action:manipulation}
 .rangebar select,.rangebar input{border:1px solid var(--line);border-radius:5px;background:var(--panel);padding:3px 6px;font-family:var(--mono)}
 .rangebar input{width:70px;text-align:right}
 .rangebar .mono{font-size:12.5px}
-@media (pointer:coarse),(max-width:1000px){.methodbox select{font-size:16px}.rangebar select,.rangebar input{font-size:16px}}
+@media (pointer:coarse),(max-width:1000px){.methodbox select,.rainform input{font-size:16px}.rangebar select,.rangebar input{font-size:16px}}
 @media (prefers-reduced-motion: reduce){.toast{transition:none}}
 </style>
 
@@ -159,6 +162,7 @@ button,.tab{touch-action:manipulation}
       <button id="bRedo" title="Ctrl+Y">다시하기</button>
       <button id="bSeed" title="업로드한 PipeTools 파일의 BC 노선 (종단파일 + 수리계산 + 결과)">BC 자료</button>
       <button id="bReset">가상 예제</button>
+      <button id="bStorm" title="PipeTools 우수 샘플 (General 강우식, BOX 포함) + 결과(rpt)">우수 예제</button>
     </div>
     <div class="sp"></div>
     <div class="btns">
@@ -226,6 +230,12 @@ button,.tab{touch-action:manipulation}
           <div class="mrow2"><select id="mCode"></select><label class="chk"><input type="checkbox" id="mProt"> 관보호공 (-B)</label></div>
           <div class="hint" id="mNote"></div>
         </div>
+      </div>
+      <div class="card" id="rainCard" hidden>
+        <div class="card-h"><h2>강우강도</h2><div class="sp"></div><span class="mono" id="rainType"></span></div>
+        <p class="hint" style="margin:0 0 8px">비가 내리는 세기(mm/hr)예요. 빗물이 관로 끝까지 모이는 데 걸리는 시간(유달시간)이 길수록 그 시간 동안의 평균 세기는 약해져서, 하류로 갈수록 강도 I는 내려가고 면적이 늘어 우수량 Q = C·I·A/360 은 커져요.</p>
+        <svg id="rainChart" viewBox="0 0 280 160" style="width:100%;display:block" aria-label="강우강도 곡선"></svg>
+        <div class="rainform" id="rainForm"></div>
       </div>
       <div class="card">
         <div class="card-h"><h2>판정 기준</h2></div>
@@ -333,55 +343,113 @@ function routesOf(pipes){
   for(const [k,v] of m)if(!res.has(k))res.set(k,chainOrder(v));
   return res;
 }
-function compute(pipes,crit){
+// ---- 단면: 원형(관경 mm) / BOX(폭 W m × 높이 m, 폭 열이 채워진 경우) ----
+const isBox=p=>+p.W>0;
+const secH=p=>isBox(p)?+p.D:(+p.D)/1000;            // 관 높이 (m)
+const secLabel=p=>(isBox(p)?`□${+(+p.W).toFixed(2)}×${+(+p.D).toFixed(2)}`:`D${p.D}`)+(+p.nb>1?`×${p.nb}`:'');
+// BOX 만관유량은 PipeTools처럼 윤변 = 폭 + 2×높이 (윗면 제외)
+const rectQ=(W,h,S,n)=>{const A=W*h,P=W+2*h;return A*Math.pow(A/P,2/3)*Math.sqrt(S)/n;};
+function flowSec(p,Q,S,n){
+  if(!isBox(p))return uniform((+p.D)/1000,Q,S,n);
+  const W=+p.W,H=+p.D,Afull=W*H,Qfull=rectQ(W,H,S,n),Vfull=Qfull/Afull;
+  if(!(Q>0))return{h:0,V:0,Qfull,Vfull,Afull,sur:false};
+  if(Q>Qfull)return{h:H,V:Q/Afull,Qfull,Vfull,Afull,sur:true};
+  let lo=0,hi=H;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(rectQ(W,m,S,n)<Q)lo=m;else hi=m;}
+  const h=(lo+hi)/2;return{h,V:Q/(W*h),Qfull,Vfull,Afull,sur:false};
+}
+const isPump=p=>/압송|펌프/.test(String(p.note||''));
+// 관로 한 개의 수리 (1련 기준 유량 Q). 압송관·역구배는 만관 V = Q/A
+function hydOf(p,Qtot){
+  const nb=Math.max(1,+p.nb||1),n=+p.n||0.013,S=(p.invUp-p.invDn)/p.L,q=Qtot/nb;
+  if(isPump(p)){const g=flowSec(p,0,Math.max(S,1e-6),n);return{h:secH(p),V:q/g.Afull,Qfull:S>0?g.Qfull:0,Vfull:S>0?g.Vfull:0,Afull:g.Afull,sur:false};}
+  if(S<=0){const g=flowSec(p,0,1e-6,n);return{h:secH(p),V:q/g.Afull,Qfull:0,Vfull:0,Afull:g.Afull,sur:true};}
+  return flowSec(p,q,S,n);
+}
+
+// ---- 강우강도식 (t: 분, 결과 mm/hr). PipeTools TYPE3 번호 ----
+const RAIN_TYPES={1:'General  I = a / (t^b + c)',2:'Talbot  I = a / (t + b)',3:'Sherman  I = a / t^b',4:'Japanese  I = a / (√t + b)',5:'Semi-Log  I = a + b·log10(t)',
+  6:'이원환  I = (a + b·log10 T) / (t^n + c)',7:'허준행  I = [a + b·ln(T/t^0.2)] / [c + d·ln(√T/t) + √t]',8:'전대수다항식  ln I = a + bL + cL² + … + gL⁶, L = ln(t/60)',9:'시간분포(타임시리즈)'};
+function rainI(rain,cls,t){
+  const k=rain.coef[cls]||{},a=k.a??0,b=k.b??0,c=k.c??0,d=k.d??0,T=k.T??10,n=k.n??0;t=Math.max(t,1e-3);
+  switch(+rain.type3){
+    case 1:return a/(Math.pow(t,b)+c);
+    case 2:return a/(t+b);
+    case 3:return a/Math.pow(t,b);
+    case 4:return a/(Math.sqrt(t)+b);
+    case 5:return a+b*Math.log10(t);
+    case 6:return(a+b*Math.log10(T))/(Math.pow(t,n)+c);
+    case 7:return(a+b*Math.log(T/Math.pow(t,0.2)))/(c+d*Math.log(Math.sqrt(T)/t)+Math.sqrt(t));
+    case 8:{const L=Math.log(t/60);return Math.exp(a+b*L+c*L*L+d*L**3+(k.e??0)*L**4+(k.f??0)*L**5+(k.g??0)*L**6);}
+    default:return 0;
+  }
+}
+// 간선/지선 구분: 원형은 관경, BOX는 단면적 기준 (PipeTools 예제: D500 지선, D700·BOX 간선)
+const rainClass=(rain,p)=>{const th=rain.mainDia||700;return isBox(p)?(+p.W*(+p.D)>=Math.PI*Math.pow(th/2000,2)?'main':'branch'):(+p.D>=th?'main':'branch');};
+
+function compute(pipes,crit,rain=null){
   const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
+  const storm=rain&&+rain.type1>1;
   const memo=new Map(),stack=new Set();
+  // 상류 → 하류 누가: 오수(인구·오수량) + 우수(면적·C×A·유달시간)
   const acc=p=>{
     if(memo.has(p.id))return memo.get(p.id);
-    if(stack.has(p.id))return{pop:0,Q:0,loop:true};
+    if(stack.has(p.id))return{pop:0,Q:0,Qs:0,A:0,CA:0,R:0,Qr:0,loop:true};   // 관망에 순환이 있으면 끊음
     stack.add(p.id);
     const popL=(+p.area||0)*(+p.dens||0);
     const QL=((+p.won||0)*(+p.pf||1)+(+p.gwon||0))*popL/86400000+(+p.ext||0);
-    let pop=popL,Q=QL;
-    (byDn.get(p.up)||[]).forEach(q=>{const a=acc(q);pop+=a.pop;Q+=a.Q;});
-    stack.delete(p.id);
-    const r={popL,pop,QL,Q};memo.set(p.id,r);return r;
+    let pop=popL,Qs=QL,A=+p.area||0,CA=(+p.C||0)*(+p.area||0),Ru=0,hasUp=false;
+    (byDn.get(p.up)||[]).forEach(q=>{const a=acc(q);pop+=a.pop;Qs+=a.Qs;A+=a.A;CA+=a.CA;Ru=Math.max(Ru,a.R||0);hasUp=true;});
+    const r={popL,pop,QL,Qs,Q:Qs,A,CA,Cavg:A>0?CA/A:0};
+    if(storm){
+      // 유달시간 반복: R = 유입시작시간 + L/(60V), I = f(R), Q = ΣCA × I / 360, V는 Q로 다시 계산 (최대 30회)
+      const cls=rainClass(rain,p),base=cls==='main'?(rain.t1??5):(rain.t2??10);
+      const tc=Math.max(hasUp?Ru:0,+p.tin>0?+p.tin:base);
+      let V=hydOf(p,0).Vfull||1,R=tc,I=0,Qr=0,it=0;
+      for(;it<30;it++){
+        R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R));Qr=CA*I/360;
+        const u=hydOf(p,Qs+Qr);const Vn=(Qs+Qr)>0&&u.V>0?u.V:(u.Vfull||V);
+        if(Math.abs(Vn-V)<1e-6){V=Vn;break;}V=Vn;
+      }
+      R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R));Qr=CA*I/360;
+      Object.assign(r,{cls,tc,R,I,Qr,Q:Qs+Qr,iter:it});
+    }
+    stack.delete(p.id);memo.set(p.id,r);return r;
   };
   const out=new Map();
   pipes.forEach(p=>{
-    const a=acc(p),D=p.D/1000,nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
+    const a=acc(p),D=secH(p),nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
     const S=(p.invUp-p.invDn)/p.L;
-    const margin=marginFor(p.D);
+    // 여유율: 오수는 관경별(하수도시설기준), 우수·합류는 계획유량 ≤ 만관유량
+    const margin=storm?(rain.margin??0):marginFor(isBox(p)?2000:p.D);
     // 압송관(비고 '압송'·'펌프'): 만관 압력흐름 V = Q/A, 유속·역구배·여유율 판정 없음 (PipeTools와 같음)
-    const pump=/압송|펌프/.test(String(p.note||''));
-    let u,adverse=!pump&&S<=0;
-    if(pump){const full=circ(D,2*Math.PI),g=uniform(D,0,Math.max(S,1e-6),n);u={h:D,V:a.Q/nb/full.A,Qfull:S>0?g.Qfull:0,Vfull:S>0?g.Vfull:0,Afull:full.A,sur:false};}
-    else if(adverse){const full=circ(D,2*Math.PI);u={h:D,V:a.Q/nb/full.A,Qfull:0,Vfull:0,Afull:full.A,sur:true};}
-    else u=uniform(D,a.Q/nb,S,n);
-    // PipeTools 방식: 허용유량 = 만관유량(원형관 허용수심비 1.0). 여유율은 따로 검토: Q×(1+여유율) ≤ Qfull
+    const pump=isPump(p);
+    const adverse=!pump&&S<=0;
+    const u=hydOf(p,a.Q);
+    // PipeTools 방식: 허용유량 = 만관유량. 여유율은 따로 검토: Q×(1+여유율) ≤ Qfull
     const Qfull=u.Qfull*nb,Qallow=Qfull,qr=Qfull>0?a.Q/Qfull:Infinity,use=Qfull>0?a.Q*(1+margin)/Qfull:Infinity;
     const covUp=p.ghUp-p.invUp-D,covDn=p.ghDn-p.invDn-D;
     const rem=[];let st=0;
     const bump=s=>{if(s>st)st=s;};
     // 유속 판정 (PipeTools 구분): 유량이 0이면 만관유속으로, 경사 100‰ 이상은 '구배10.0%이상'
+    const LOW=`NG(V)${(+crit.vlow).toFixed(1)}↓`,HIGH=`NG(V)${(+crit.vmax).toFixed(1)}↑`;
     let vLabel=null,marginOK=true;
     if(pump){rem.push('압송관');}
-    else if(adverse){rem.push(S===0?'ZERO_SLOPE':'Adverse Slope');bump(2);vLabel='NG(V)0.3↓';marginOK=false;}
+    else if(adverse){rem.push(S===0?'ZERO_SLOPE':'Adverse Slope');bump(2);vLabel=LOW;marginOK=false;}
     else{
       marginOK=use<=1;
       if(!marginOK){rem.push('NG_'+Math.round(use*100)+'%');bump(2);}
       const Vj=a.Q>0?u.V:u.Vfull;
-      if(Vj<(crit.vlow||0))vLabel='NG(V)0.3↓';
+      if(Vj<(crit.vlow||0))vLabel=LOW;
       else if(Vj<crit.vmin)vLabel='유지관리';
-      else if(Vj>crit.vmax)vLabel='NG(V)3.0↑';
+      else if(Vj>crit.vmax)vLabel=HIGH;
       else vLabel='GOOD';
       // 경사 100‰ 이상이면 유속 NG를 '구배10.0%이상'으로 (급경사라 유속 기준 대신 구배로 판단)
       if(/^NG/.test(vLabel)&&S*1000>=(crit.smax??100))vLabel='구배10.0%이상';
       if(!(a.Q>0))rem.push('Q=0');
       if(vLabel==='구배10.0%이상'){rem.push('SLOPE'+(S*100).toFixed(1)+'%');bump(1);}
-      else if(vLabel==='NG(V)0.3↓'){rem.push((a.Q>0?'LESS':'Vfull')+Vj.toFixed(2)+(S*1000>=10&&a.Q>0?' S≥1%':''));bump(2);}
+      else if(vLabel===LOW){rem.push((a.Q>0?'LESS':'Vfull')+Vj.toFixed(2)+(S*1000>=10&&a.Q>0?' S≥1%':''));bump(2);}
       else if(vLabel==='유지관리'){rem.push((a.Q>0?'LESS':'Vfull')+Vj.toFixed(2));bump(1);}
-      else if(vLabel==='NG(V)3.0↑'){rem.push('UPPR'+Vj.toFixed(2));bump(2);}
+      else if(vLabel===HIGH){rem.push('UPPR'+Vj.toFixed(2));bump(2);}
     }
     const zAt=c=>p.invUp+(p.invDn-p.invUp)*c/p.L;
     // 토피 검토점: 상류단, 중간 측점, 하류단. 관보호공(-B) 구간의 점은 따로 센다
@@ -401,7 +469,7 @@ function compute(pipes,crit){
     const coverNG=cminU<crit.cover-0.0005,coverProt=!coverNG&&cmin<crit.cover-0.0005;
     if(coverNG)flags.unshift('COVER'+cminU.toFixed(2));
     else if(coverProt)flags.unshift('보호공'+cmin.toFixed(2));
-    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU,cminAll,qr,vLabel,marginOK,pump});
+    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU,cminAll,qr,vLabel,marginOK,pump,storm});
   });
   // 맨홀 접합 검토: 유입관 하류관저가 유출관 상류관저보다 낮으면 역류
   const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
@@ -414,8 +482,8 @@ function compute(pipes,crit){
   return out;
 }
 function slopeForV(p,Q,target){
-  const D=p.D/1000,nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
-  const v=S=>uniform(D,Q/nb,S,n).V;
+  const nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
+  const v=S=>flowSec(p,Q/nb,S,n).V;
   let lo=1e-5,hi=0.3;if(v(hi)<target)return hi;
   for(let i=0;i<60;i++){const m=(lo+hi)/2;if(v(m)<target)lo=m;else hi=m;}
   return hi;
@@ -480,7 +548,8 @@ PT.parseHyd=rows=>{
     if(!(p.D>0))errs.push(`${at}: 관경(높이)이 0 이하`);
     ids.add(p.id);pipes.push(p);
   }
-  return{head:rows.slice(0,h+1),pipes,errs,type1};
+  const head=rows.slice(0,h+1);
+  return{head,pipes,errs,type1,rain:PT.parseRain(head)};
 };
 // 수리계산 결과(rpt) 시트: 비교용으로 관로별 값만 읽는다 (유량 단위 ㎥/d)
 PT.parseRpt=rows=>{
@@ -488,13 +557,23 @@ PT.parseRpt=rows=>{
   const r2=(rows[h]||[]).map(PT.norm),r3=(rows[h+1]||[]).map(PT.norm);
   // nth번째로 나오는 2행 제목의 열 (없으면 PipeTools 기본 위치)
   const at=(name,nth,def)=>{let c=0;for(let j=0;j<r2.length;j++)if(r2[j]===name){if(c===nth)return j;c++;}return def;};
-  const C={id:1,S:12,Qfull:at('만관',0,19),Vfull:at('만관',1,20),Q:at('실유량',0,31),V:at('실유속',0,32),h:at('실수심',0,33),qr:at('유량비',0,34),hr:at('수심비',0,35),ckM:at('설계',0,36),ckV:at('설계',1,37),ckC:at('설계',2,38)};
+  const r4=(rows[h+2]||[]).map(PT.norm),toCMS=r4.some(x=>/sec/i.test(x))?1:1/86400;   // 우수 rpt는 ㎥/sec, 오수 rpt는 ㎥/d
+  const C={id:1,S:12,Rt:at('유달',0,17),It:at('강우',0,18),Qfull:at('만관',0,19),Vfull:at('만관',1,20),Q:at('실유량',0,31),V:at('실유속',0,32),h:at('실수심',0,33),qr:at('유량비',0,34),hr:at('수심비',0,35),ckM:at('설계',0,36),ckV:at('설계',1,37),ckC:at('설계',2,38)};
   C.S=r3.indexOf('경사')>=0?r3.indexOf('경사'):12;
   const out=new Map();
   for(let i=h+3;i<rows.length;i++){const r=rows[i]||[],id=String(r[C.id]??'').trim();if(!id)continue;
     const n=k=>PT.num(r[C[k]]);
-    out.set(id,{S:n('S'),Qfull:n('Qfull'),Vfull:n('Vfull'),Q:n('Q'),V:n('V'),h:n('h'),qr:n('qr'),hr:n('hr'),ckM:String(r[C.ckM]??''),ckV:String(r[C.ckV]??''),ckC:String(r[C.ckC]??'')});}
+    out.set(id,{S:n('S'),Qfull:n('Qfull')*toCMS,Vfull:n('Vfull'),Q:n('Q')*toCMS,V:n('V'),h:n('h'),R:n('Rt'),I:n('It'),qr:n('qr'),hr:n('hr'),ckM:String(r[C.ckM]??''),ckV:String(r[C.ckV]??''),ckC:String(r[C.ckC]??'')});}
   return out;
+};
+// 수리시트 1·2행 옵션 → 강우 설정 (TYPE1 2=우수, 3=합류). 계수 이름 뒤 1 = 간선, 2 = 지선 (없으면 공통)
+PT.parseRain=head=>{
+  const h=head.length-1,nm=(head[h-2]||[]).map(v=>String(v??'').trim()),vl=head[h-1]||[],v={};
+  nm.forEach((k,i)=>{if(k)v[k]=PT.num(vl[i]);});
+  const type1=isFinite(v.TYPE1)?v.TYPE1:1;
+  if(!(type1>1))return{type1:1};
+  const pick=suf=>{const o={};['a','b','c','d','e','f','g','n'].forEach(k=>{const x=isFinite(v[k+suf])?v[k+suf]:v[k];if(isFinite(x))o[k]=x;});if(isFinite(v['T'+suf]))o.T=v['T'+suf];return o;};
+  return{type1,type2:v.TYPE2||1,type3:v.TYPE3||1,coef:{main:pick('1'),branch:pick('2')},t1:isFinite(v.t1)?v.t1:5,t2:isFinite(v.t2)?v.t2:10,mainDia:700,margin:0,names:nm,row:h-1};
 };
 // 지장물 열: "구간내거리,INV,규격,이름;..."  규격은 mm 또는 "폭*높이"(m)
 PT.size=s=>{s=String(s??'').trim();if(s.includes('*')){const [w,h]=s.split('*').map(PT.num);return{w,h,box:true};}const d=PT.num(s)/1000;return{w:d,h:d,box:false};};
@@ -655,7 +734,7 @@ const $=s=>document.querySelector(s);
 const NS='http://www.w3.org/2000/svg';
 const clone=o=>JSON.parse(JSON.stringify(o));
 const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,clear:0.3,coverMode:'pt'};
-const doc={profiles:new Map(),hydHead:null,file:'',base:new Map(),rpt:new Map()};
+const doc={profiles:new Map(),hydHead:null,file:'',base:new Map(),rpt:new Map(),rain:null};
 // 불러온 시점 값 (변경 추적용)
 const BASE_KEYS=['invUp','invDn','ghUp','ghDn','D','code'];
 function snapBase(){doc.base=new Map(pipes.map(p=>[p.id,Object.fromEntries(BASE_KEYS.map(k=>[k,p[k]??'']))]));}
@@ -694,8 +773,8 @@ function render(){
   if(!routes.has(ui.route))ui.route=routes.keys().next().value;
   applyRange();
   if(!P(ui.sel)){ui.sel=routes.get(ui.route)[0].id;ui.handle=null;}
-  res=compute(pipes,crit);
-  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();renderRangeBar();
+  res=compute(pipes,crit,doc.rain);
+  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();renderRangeBar();renderRain();
   $('#subTitle').textContent=`오수 원단위식 · Manning 등류 · ${doc.file||'가상 예제 관망 (본선 + 분기 3개)'}`;
   $('#uS').classList.toggle('on',!ui.qd);$('#uD').classList.toggle('on',ui.qd);
   $('#bUndo').disabled=!undo.length;$('#bRedo').disabled=!redo.length;
@@ -865,7 +944,7 @@ function renderProfile(){
   }
   // 관로 + 수면 + 라벨
   g.ch.forEach((p,i)=>{
-    const r=res.get(p.id),D=p.D/1000,x1=X(g.cs[i])+MW/2,x2=X(g.cs[i+1])-MW/2,sel=p.id===ui.sel;
+    const r=res.get(p.id),D=secH(p),x1=X(g.cs[i])+MW/2,x2=X(g.cs[i+1])-MW/2,sel=p.id===ui.sel;
     const c=`var(--${stCls(r.st)})`;
     h+=`<polygon class="pb" data-pid="${esc(p.id)}" data-end="body" points="${x1},${Y(p.invUp)} ${x2},${Y(p.invDn)} ${x2},${Y(p.invDn+D)} ${x1},${Y(p.invUp+D)}" fill="var(--pipe-fill)" stroke="${sel?'var(--accent)':'var(--pipe)'}" stroke-width="${sel?2:1.2}"/>`;
     const hh=Math.min(r.h,D);
@@ -875,11 +954,11 @@ function renderProfile(){
     const vt=`V ${r.V.toFixed(2)}`;
     if(x2-x1>=64)h+=`<g pointer-events="none"><rect x="${mx-30}" y="${cy-40}" width="60" height="17" rx="8.5" fill="${c}"/>`+
        `<text x="${mx}" y="${cy-28}" font-size="11" font-weight="600" text-anchor="middle" fill="var(--panel)">${vt}</text>`+
-       `<text x="${mx}" y="${cy-9}" font-size="10" text-anchor="middle" fill="var(--ink)">D${p.D} · ${r.S.toFixed(2)}‰</text></g>`;
+       `<text x="${mx}" y="${cy-9}" font-size="10" text-anchor="middle" fill="var(--ink)">${secLabel(p)} · ${r.S.toFixed(2)}‰</text></g>`;
   });
   // 관보호공(-B) 구간: 관 둘레에 점선 보호층
   g.ch.forEach((p,i)=>{
-    const D=p.D/1000,cuts=[{c:0,code:p.code},...(p.st||[]).map(t=>({c:t.c,code:t.code??p.code})),{c:p.L,code:null}];
+    const D=secH(p),cuts=[{c:0,code:p.code},...(p.st||[]).map(t=>({c:t.c,code:t.code??p.code})),{c:p.L,code:null}];
     for(let k=0;k<cuts.length-1;k++){if(!isProt(cuts[k].code))continue;
       const a=cuts[k].c,b=cuts[k+1].c,za=p.invUp+(p.invDn-p.invUp)*a/p.L,zb=p.invUp+(p.invDn-p.invUp)*b/p.L,xa=X(g.cs[i]+a),xb=X(g.cs[i]+b),pad=0.12;
       h+=`<polygon points="${xa},${Y(za-pad)} ${xb},${Y(zb-pad)} ${xb},${Y(zb+D+pad)} ${xa},${Y(za+D+pad)}" fill="var(--accent)" fill-opacity=".10" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3 2" pointer-events="none"/>`;}
@@ -890,7 +969,7 @@ function renderProfile(){
     (p.obs||[]).forEach((o,k)=>{
       const x=X(g.cs[i]+Math.max(0,Math.min(p.L,o.off))),ry=Math.max(2.5,o.h*ppm/2),cy=Y(o.inv+o.h/2);
       const zp=p.invUp+(p.invDn-p.invUp)*Math.max(0,Math.min(p.L,o.off))/p.L,top=o.inv+o.h;
-      const gap=top<=zp?zp-top:o.inv>=zp+p.D/1000?o.inv-(zp+p.D/1000):-1;
+      const gap=top<=zp?zp-top:o.inv>=zp+secH(p)?o.inv-(zp+secH(p)):-1;
       const col=gap<0?'var(--bad)':gap<crit.clear?'var(--warn)':'var(--muted)';
       h+=o.box?`<rect x="${x-ry}" y="${cy-ry}" width="${2*ry}" height="${2*ry}" fill="none" stroke="${col}" stroke-width="1.4" pointer-events="none"/>`
               :`<circle cx="${x}" cy="${cy}" r="${ry}" fill="none" stroke="${col}" stroke-width="1.4" pointer-events="none"/>`;
@@ -902,7 +981,7 @@ function renderProfile(){
     const x=X(g.cs[i]);
     pipes.filter(p=>p.dn===n&&p.line!==ui.route).forEach((p,k)=>{
       const r=res.get(p.id),y=Y(p.invDn),col=r.joint?'var(--bad)':'var(--sewage)';
-      h+=`<g data-pid="${esc(p.id)}" data-branch="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${Math.max(3,p.D/1000*ppm/2)}" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="3 2"/>`+
+      h+=`<g data-pid="${esc(p.id)}" data-branch="1" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="${Math.max(3,secH(p)*ppm/2)}" fill="none" stroke="${col}" stroke-width="1.6" stroke-dasharray="3 2"/>`+
          `<text x="${x+9}" y="${y+16+k*12}" font-size="9.5" fill="${col}">${esc(p.line)} ${f2(p.invDn)}${r.joint?' ▲접합불량':''}</text></g>`;
     });
   });
@@ -944,7 +1023,7 @@ function renderProfile(){
     const r=res.get(p.id),x=(X(g.cs[i])+X(g.cs[i+1]))/2,c=`var(--${stCls(r.st)})`;
     const rem=r.rem[0];
     const sw=X(g.cs[i+1])-X(g.cs[i]);if(sw<36)return;
-    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600))+
+    h+=T(x,4,p.L.toFixed(1))+T(x,5,r.S.toFixed(2),r.S<=0?'var(--bad)':'var(--ink)')+T(x,6,isBox(p)?secLabel(p).slice(1):p.D+(p.nb>1?`×${p.nb}`:''))+T(x,7,r.V.toFixed(2),c,600)+(sw>=rem.length*6.4+4?T(x,8,rem,c,600):T(x,8,'●',c,600))+
       (sw>=(p.code||'').length*6.4+4?T(x,9,esc(p.code||'')+((p.st||[]).some(t=>(t.code??p.code)!==p.code)?'*':''),isProt(p.code)?'var(--accent)':'var(--muted)',isProt(p.code)?600:400):'');
   });
   svg.innerHTML=h;
@@ -1012,6 +1091,17 @@ function renderSection(){
   $('#secId').textContent=`${p.id}  ${p.up} → ${p.dn}`;
   const cx=95,cy=95,R=72,hD=Math.min(1,r.hD),wy=cy+R-2*R*hD;
   const c=`var(--${stCls(r.st)})`;
+  if(isBox(p)){
+    // BOX: 폭·높이 비율대로 사각형
+    const W=+p.W,H=+p.D,sc=Math.min(130/W,120/H),bw=W*sc,bh=H*sc,x0=cx-bw/2,y0=cy-bh/2+10,wyb=y0+bh*(1-hD);
+    $('#sec').innerHTML=`<rect x="${x0-7}" y="${y0-7}" width="${bw+14}" height="${bh+14}" fill="var(--pipe-fill)" stroke="var(--pipe)"/>`+
+      `<rect x="${x0}" y="${y0}" width="${bw}" height="${bh}" fill="var(--panel)" stroke="var(--pipe)"/>`+
+      `<rect x="${x0}" y="${wyb}" width="${bw}" height="${y0+bh-wyb}" fill="${r.sur?'var(--bad)':'var(--sewage-fill)'}" opacity=".85"/>`+
+      `<line x1="${x0-12}" x2="${x0+bw+12}" y1="${wyb}" y2="${wyb}" stroke="var(--sewage)" stroke-width="1.4" stroke-dasharray="4 3"/>`+
+      `<text x="${x0+bw+16}" y="${(y0+bh+wyb)/2+4}" font-size="11" fill="var(--ink)">h ${(r.h*1000).toFixed(0)}</text>`+
+      `<text x="${x0+bw+16}" y="${(y0+bh+wyb)/2+18}" font-size="11" fill="var(--muted)">h/H ${(r.hD*100).toFixed(0)}%</text>`+
+      `<text x="${cx}" y="${y0-14}" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">${secLabel(p)}  <tspan fill="${c}" font-size="11">V ${r.V.toFixed(2)} m/s</tspan></text>`;
+  }else{
   let s=`<defs><clipPath id="cc"><circle cx="${cx}" cy="${cy}" r="${R}"/></clipPath></defs>`+
     `<circle cx="${cx}" cy="${cy}" r="${R+7}" fill="var(--pipe-fill)" stroke="var(--pipe)"/>`+
     `<circle cx="${cx}" cy="${cy}" r="${R}" fill="var(--panel)" stroke="var(--pipe)"/>`+
@@ -1020,11 +1110,16 @@ function renderSection(){
     `<line x1="${cx+R+22}" x2="${cx+R+22}" y1="${cy+R}" y2="${wy}" stroke="var(--ink)"/>`+
     `<text x="${cx+R+28}" y="${(cy+R+wy)/2+4}" font-size="11" fill="var(--ink)">h ${(r.h*1000).toFixed(0)}</text>`+
     `<text x="${cx+R+28}" y="${(cy+R+wy)/2+18}" font-size="11" fill="var(--muted)">h/D ${(r.hD*100).toFixed(0)}%</text>`+
-    `<text x="${cx}" y="${cy-R/2+4}" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">D ${p.D}${p.nb>1?' ×'+p.nb:''}</text>`+
+    `<text x="${cx}" y="${cy-R/2+4}" font-size="13" font-weight="600" text-anchor="middle" fill="var(--ink)">${secLabel(p)}</text>`+
     `<text x="${cx}" y="${cy-R/2+20}" font-size="11" text-anchor="middle" fill="${c}" font-weight="600">V ${r.V.toFixed(2)} m/s</text>`;
-  $('#sec').innerHTML=s;
+  $('#sec').innerHTML=s;}
   const kv=[
-    ['누가인구',Math.round(r.pop).toLocaleString()+' 인'],
+    ...(r.storm?[
+      ['관로 구분',r.cls==='main'?'간선 (간선 계수)':'지선 (지선 계수)'],
+      ['누가면적 / 평균 C',`${r.A.toFixed(2)} ha / ${r.Cavg.toFixed(3)}`],
+      ['유입 시작 → 유달시간',`${r.tc.toFixed(2)} → ${r.R.toFixed(2)} 분`],
+      ['강우강도 I',`${r.I.toFixed(2)} mm/hr`],
+      ['우수량 C·I·A/360',`${r.Qr.toFixed(4)} m³/s`]]:[['누가인구',Math.round(r.pop).toLocaleString()+' 인']]),
     ['설계유량 Q',fq(r.Q)+' '+qu()],
     ['만관유량 Qfull',fq(r.Qfull)+' '+qu()],
     ['허용유량 (=만관)',fq(r.Qallow)+' '+qu()],
@@ -1054,48 +1149,99 @@ $('#bFitV').onclick=()=>{const p=P(ui.sel),r=res.get(p.id);
   const S=slopeForV(p,r.Q,crit.vmin+0.005);
   const target=Math.floor((p.invUp-S*p.L)*100)/100;
   edit(()=>shiftEnd(p.id,'dn',target-p.invDn,ui.linked));toast(`${p.id} 하류관저 ${f2(target)} (S ${((p.invUp-target)/p.L*1000).toFixed(2)}‰)`);};
-$('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;let pick=DIAS[DIAS.length-1];
-  for(const d of DIAS){p.D=d;const r=compute(pipes,crit).get(p.id);if(r.use<=1){pick=d;break;}}
+$('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;if(isBox(p)){toast('BOX 암거는 관경 자동 선택을 지원하지 않습니다');return;}let pick=DIAS[DIAS.length-1];
+  for(const d of DIAS){p.D=d;const r=compute(pipes,crit,doc.rain).get(p.id);if(r.use<=1){pick=d;break;}}
   p.D=orig;if(pick===orig){toast('현재 관경이 최소 적합 관경입니다');return;}
   edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
-const stepD=k=>{const p=P(ui.sel);const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
+const stepD=k=>{const p=P(ui.sel);if(isBox(p)){toast('BOX 암거는 관경 단계 변경을 지원하지 않습니다');return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
 $('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
+
+/* ---------- 강우강도 패널 ---------- */
+function renderRain(){
+  const rn=doc.rain,card=$('#rainCard'),on=!!(rn&&rn.type1>1);card.hidden=!on;if(!on)return;
+  $('#rainType').textContent=`TYPE3=${rn.type3}`;
+  // I–t 곡선: 간선·지선, 선택 관로의 유달시간·강도 표시
+  const W=280,H=160,L=36,Rr=34,T=20,B=32,t0=5,t1=120,ts=[];for(let t=t0;t<=t1;t+=1)ts.push(t);
+  const Im=ts.map(t=>rainI(rn,'main',t)),Ib=ts.map(t=>rainI(rn,'branch',t));
+  const all=[...Im,...Ib].filter(v=>isFinite(v)&&v>0),mx=all.length?Math.max(...all):100;
+  const step=mx>150?50:mx>60?20:10,ymax=Math.ceil(mx/step)*step;
+  const x=t=>L+(t-t0)/(t1-t0)*(W-L-Rr),y=v=>T+(1-Math.max(0,Math.min(v,ymax))/ymax)*(H-T-B);
+  let h='';
+  for(let v=0;v<=ymax;v+=step)h+=`<line x1="${L}" x2="${W-Rr}" y1="${y(v)}" y2="${y(v)}" stroke="var(--grid)"/><text x="${L-4}" y="${y(v)+3}" font-size="9" text-anchor="end" fill="var(--muted)">${v}</text>`;
+  [5,30,60,90,120].forEach(t=>{h+=`<text x="${x(t)}" y="${H-B+12}" font-size="9" text-anchor="middle" fill="var(--muted)">${t}</text>`;});
+  h+=`<text x="${(L+W-Rr)/2}" y="${H-6}" font-size="9" text-anchor="middle" fill="var(--muted)">유달시간 t (분)</text><text x="4" y="9" font-size="9" fill="var(--muted)">I (mm/hr)</text>`;
+  const line=(arr,col)=>`<path d="${arr.map((v,i)=>(i?'L':'M')+x(ts[i]).toFixed(1)+' '+y(v).toFixed(1)).join(' ')}" fill="none" stroke="${col}" stroke-width="2"/>`;
+  h+=line(Im,'var(--accent)')+line(Ib,'var(--sewage)');
+  // 끝 라벨: 두 곡선 끝이 가까우면 위아래로 벌림
+  let ym=y(Im[Im.length-1]),yb=y(Ib[Ib.length-1]);if(Math.abs(ym-yb)<11){const c=(ym+yb)/2,s=ym<=yb?-1:1;ym=c+s*5.5;yb=c-s*5.5;}
+  h+=`<text x="${W-Rr+4}" y="${ym+3}" font-size="9.5" fill="var(--accent)" font-weight="600">간선</text><text x="${W-Rr+4}" y="${yb+3}" font-size="9.5" fill="var(--sewage)" font-weight="600">지선</text>`;
+  const r=res.get(ui.sel);
+  if(r&&r.storm&&r.R<=t1){const cx=x(Math.max(t0,r.R)),cy=y(r.I);
+    h+=`<line x1="${cx}" x2="${cx}" y1="${cy}" y2="${H-B}" stroke="var(--ink)" stroke-dasharray="2 2"/><circle cx="${cx}" cy="${cy}" r="4.5" fill="${r.cls==='main'?'var(--accent)':'var(--sewage)'}" stroke="var(--panel)" stroke-width="2"/>`+
+       `<text x="${Math.min(cx+7,W-Rr-60)}" y="${cy-8}" font-size="9.5" font-weight="600" fill="var(--ink)">${esc(ui.sel)} ${r.R.toFixed(1)}분 · ${r.I.toFixed(1)}</text>`;}
+  $('#rainChart').innerHTML=h;
+  // 계수 입력: 이름 뒤 1 = 간선, 2 = 지선. 이름이 하나뿐이면 공통
+  const names=rn.names||[],has=k=>names.includes(k);
+  const keys=['a','b','c','d','e','f','g','n'].filter(k=>has(k+'1')||has(k+'2')||has(k));
+  const cell=(cls,k)=>`<input data-cls="${cls}" data-k="${k}" value="${rn.coef[cls][k]??''}" inputmode="decimal" aria-label="${cls==='main'?'간선':'지선'} ${k}">`;
+  let f=`<div class="hd" style="text-align:left">${esc(RAIN_TYPES[rn.type3]||'미지원 식')}</div><div class="hd">간선</div><div class="hd">지선</div>`;
+  keys.forEach(k=>{f+=has(k+'1')||has(k+'2')?`<label>${k}</label>${cell('main',k)}${cell('branch',k)}`:`<label>${k} (공통)</label><div style="grid-column:span 2">${cell('main',k)}</div>`;});
+  if(has('T1')||has('T2'))f+=`<label>재현기간 T (년)</label>${cell('main','T')}${cell('branch','T')}`;
+  f+=`<label>유입시간 (분)</label><input data-t="t1" value="${rn.t1}" inputmode="decimal" aria-label="간선 유입시간"><input data-t="t2" value="${rn.t2}" inputmode="decimal" aria-label="지선 유입시간">`;
+  f+=`<label>간선 기준 관경</label><div style="grid-column:span 2;display:flex;gap:6px;align-items:center"><input data-t="mainDia" value="${rn.mainDia}" inputmode="decimal" aria-label="간선 기준 관경"><span class="hint" title="BOX는 같은 단면적 기준">mm 이상</span></div>`;
+  if(rn.type3<1||rn.type3>8)f+=`<div class="err" style="grid-column:1/-1">이 강우강도 형식은 아직 계산하지 않습니다.</div>`;
+  else if(rn.type3!==1)f+=`<div class="hint" style="grid-column:1/-1">TYPE3=${rn.type3} 식은 표준 형태로 구현했고 PipeTools 결과로는 아직 검증하지 않았습니다 (TYPE1 General은 검증 완료).</div>`;
+  if(document.activeElement&&$('#rainForm').contains(document.activeElement))return;
+  $('#rainForm').innerHTML=f;
+}
+// 계수를 바꾸면 수리시트 2행(옵션 값)에도 반영해 내보낼 때 같이 나간다
+$('#rainForm').addEventListener('change',e=>{
+  const el=e.target,rn=doc.rain;if(!rn)return;const v=parseFloat(el.value);if(!isFinite(v)){toast('숫자를 입력하세요');renderRain();return;}
+  const setHead=(name,val)=>{const i=(rn.names||[]).indexOf(name);if(i>=0&&doc.hydHead&&doc.hydHead[rn.row])doc.hydHead[rn.row][i]=val;};
+  if(el.dataset.t){rn[el.dataset.t]=v;if(el.dataset.t!=='mainDia')setHead(el.dataset.t,v);}
+  else{const cls=el.dataset.cls,k=el.dataset.k,suf=cls==='main'?'1':'2',names=rn.names||[];
+    if(k==='T'){rn.coef[cls].T=v;setHead('T'+suf,v);}
+    else if(names.includes(k+suf)){rn.coef[cls][k]=v;setHead(k+suf,v);}
+    else{rn.coef.main[k]=v;rn.coef.branch[k]=v;setHead(k,v);}}
+  render();toast('강우 계수를 바꿨습니다 · 수리시트 복사 시 반영');
+});
 
 /* ---------- PipeTools 결과 비교 ---------- */
 const cmpOn=()=>ui.cmp&&doc.rpt.size>0;
 // 유속 판정 구분: PipeTools GOOD / 유지관리 / NG(V)
 function cmpStats(){
-  let n=0,dv=0,dh=0,dq=0,same=0,cov=0,mar=0;
+  let n=0,dv=0,dh=0,dq=0,same=0,cov=0,mar=0,dI=0,dR=0;
   pipes.forEach(p=>{const t=doc.rpt.get(p.id),r=res.get(p.id);if(!t||!r||!isFinite(t.V))return;n++;
     dv=Math.max(dv,Math.abs(r.V-t.V));dh=Math.max(dh,Math.abs(r.h*1000-t.h*1000));
-    if(t.Qfull>0)dq=Math.max(dq,Math.abs(r.Qfull*86400/t.Qfull-1));
+    if(t.Qfull>0)dq=Math.max(dq,Math.abs(r.Qfull/t.Qfull-1));
+    if(r.storm&&isFinite(t.I)){dI=Math.max(dI,Math.abs(r.I-t.I));dR=Math.max(dR,Math.abs(r.R-t.R));}
     if((r.vLabel||'')===String(t.ckV||'').trim())same++;
     if(((r.coverNG||r.coverProt)?'NG':'GOOD')===String(t.ckC).trim())cov++;
     if((r.marginOK?'GOOD':'NG')===(/GOOD/i.test(t.ckM)?'GOOD':'NG'))mar++;});
-  return{n,dv,dh,dq,same,cov,mar};
+  return{n,dv,dh,dq,same,cov,mar,dI,dR};
 }
 function cmpChip(){if(!doc.rpt.size)return'';const c=cmpStats();
-  return `<button class="chip cmpchip${ui.cmp?' on':''}" id="cmpChip" title="불러온 PipeTools 계산결과(rpt)와 비교 · 누르면 비교 열 켜기/끄기">PipeTools 대비 ΔV≤${c.dv.toFixed(3)} · 판정 일치 여유율 ${c.mar}/${c.n} · 유속 ${c.same}/${c.n} · 토피 ${c.cov}/${c.n}</button>`;}
+  return `<button class="chip cmpchip${ui.cmp?' on':''}" id="cmpChip" title="불러온 PipeTools 계산결과(rpt)와 비교 · 누르면 비교 열 켜기/끄기">PipeTools 대비 ΔV≤${c.dv.toFixed(3)}${doc.rain?.type1>1?` · ΔI≤${c.dI.toFixed(2)} · Δ유달≤${c.dR.toFixed(2)}분`:''} · 판정 일치 여유율 ${c.mar}/${c.n} · 유속 ${c.same}/${c.n} · 토피 ${c.cov}/${c.n}</button>`;}
 function cmpCells(p,r){
   if(!cmpOn())return'';const t=doc.rpt.get(p.id);if(!t)return'<td class="cmp" colspan="6">—</td>';
   const dv=r.V-t.V,dh=r.h*1000-(isFinite(t.h)?t.h*1000:r.h*1000),ok=(r.vLabel||'')===String(t.ckV||'').trim();
   const sg=(v,dp)=>{const t=v.toFixed(dp);return(/^-/.test(t)&&!/^-0\.0*$/.test(t)?'':'+')+t.replace(/^-(0\.0*)$/,'$1');};
   return `<td class="cmp">${t.V.toFixed(3)}</td><td class="cmp" style="${Math.abs(dv)>0.01?'color:var(--bad);font-weight:600':''}">${sg(dv,3)}</td>`+
-    `<td class="cmp">${(t.h*1000).toFixed(1)}</td><td class="cmp">${sg(dh,1)}</td><td class="cmp">${ui.qd?t.Qfull.toFixed(1):(t.Qfull/86400).toFixed(4)}</td>`+
+    `<td class="cmp">${(t.h*1000).toFixed(1)}</td><td class="cmp">${sg(dh,1)}</td><td class="cmp">${fq(t.Qfull)}</td>`+
     `<td class="cmp l"><span style="${ok?'':'color:var(--bad);font-weight:600'}">${esc(t.ckM)} · ${esc(t.ckV)} · ${esc(t.ckC)}</span></td>`;
 }
 
 /* ---------- 표 ---------- */
 function renderTable(){
   const list=ui.tableAll?[...routes.values()].flat():routes.get(ui.route);
-  let h=`<thead><tr><th class="l">관로</th><th class="l">노선</th><th class="l">상류→하류</th><th>연장</th><th>관경</th><th>경사‰</th><th>INV 상</th><th>INV 하</th><th>GH 상</th><th>GH 하</th><th class="l">공법</th><th>누가인구</th><th>Q ${qu()}</th><th>Qfull</th><th>V m/s</th><th>h/D</th><th title="Q/Qfull (PipeTools 유량비)">유량비</th><th title="${crit.coverMode==='all'?'상·하류단과 모든 측점 중 최소':'관로 상류단 (PipeTools 방식)'}">토피${crit.coverMode==='all'?' min':' 상류'}</th><th class="l">판정</th><th class="l">토피·지장물</th>${cmpOn()?'<th class="cmp">PT 실유속</th><th class="cmp">ΔV</th><th class="cmp">PT 실수심 mm</th><th class="cmp">Δh mm</th><th class="cmp">PT Qfull</th><th class="cmp l">PT 판정 (여유율·유속·토피)</th>':''}</tr></thead><tbody>`;
+  let h=`<thead><tr><th class="l">관로</th><th class="l">노선</th><th class="l">상류→하류</th><th>연장</th><th>관경</th><th>경사‰</th><th>INV 상</th><th>INV 하</th><th>GH 상</th><th>GH 하</th><th class="l">공법</th>${doc.rain?.type1>1?'<th>누가면적 ha</th><th>평균C</th><th>유달 분</th><th>I mm/hr</th>':'<th>누가인구</th>'}<th>Q ${qu()}</th><th>Qfull</th><th>V m/s</th><th>h/D</th><th title="Q/Qfull (PipeTools 유량비)">유량비</th><th title="${crit.coverMode==='all'?'상·하류단과 모든 측점 중 최소':'관로 상류단 (PipeTools 방식)'}">토피${crit.coverMode==='all'?' min':' 상류'}</th><th class="l">판정</th><th class="l">토피·지장물</th>${cmpOn()?'<th class="cmp">PT 실유속</th><th class="cmp">ΔV</th><th class="cmp">PT 실수심 mm</th><th class="cmp">Δh mm</th><th class="cmp">PT Qfull</th><th class="cmp l">PT 판정 (여유율·유속·토피)</th>':''}</tr></thead><tbody>`;
   list.forEach(p=>{const r=res.get(p.id),chg=new Set(changedKeys(p)),cc=k=>chg.has(k)?' class="chg"':'';
     const inp=(k,v)=>`<input data-k="${k}" data-pid="${esc(p.id)}" value="${v}" inputmode="decimal" aria-label="${k}">`;
     h+=`<tr data-pid="${esc(p.id)}" class="${p.id===ui.sel?'sel':''}"><td class="l">${esc(p.id)}</td><td class="l">${esc(p.line)}</td><td class="l">${esc(p.up)}→${esc(p.dn)}</td><td>${p.L.toFixed(1)}</td>`+
-      `<td${cc('D')}><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`+
+      (isBox(p)?`<td class="l">${secLabel(p)}</td>`:`<td${cc('D')}><select data-k="D" data-pid="${esc(p.id)}" aria-label="관경">${(DIAS.includes(p.D)?DIAS:[p.D,...DIAS]).map(d=>`<option${d===p.D?' selected':''}>${d}</option>`).join('')}</select></td>`)+
       `<td>${inp('S',r.S.toFixed(2))}</td><td${cc('invUp')}>${inp('invUp',f2(p.invUp))}</td><td${cc('invDn')}>${inp('invDn',f2(p.invDn))}</td><td${cc('ghUp')}>${inp('ghUp',f2(p.ghUp))}</td><td${cc('ghDn')}>${inp('ghDn',f2(p.ghDn))}</td>`+
       `<td class="l${chg.has('code')?' chg':''}" title="${esc(codeName(p.code))}">${esc(p.code||'—')}${(p.st||[]).some(t=>(t.code??p.code)!==p.code)?'*':''}</td>`+
-      `<td>${Math.round(r.pop).toLocaleString()}</td><td>${fq(r.Q)}</td><td>${fq(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.qr)?(r.qr*100).toFixed(1)+'%':'—'}</td><td style="${r.coverNG?'color:var(--warn);font-weight:600':''}">${f2(r.cmin)}</td>`+
+      (r.storm?`<td>${r.A.toFixed(2)}</td><td>${r.Cavg.toFixed(3)}</td><td>${r.R.toFixed(2)}</td><td>${r.I.toFixed(2)}</td>`:`<td>${Math.round(r.pop).toLocaleString()}</td>`)+`<td>${fq(r.Q)}</td><td>${fq(r.Qfull)}</td><td style="color:var(--${stCls(r.st)});font-weight:600">${r.V.toFixed(2)}</td><td>${(r.hD*100).toFixed(0)}%</td><td>${isFinite(r.qr)?(r.qr*100).toFixed(1)+'%':'—'}</td><td style="${r.coverNG?'color:var(--warn);font-weight:600':''}">${f2(r.cmin)}</td>`+
       `<td class="l"><span class="remark ${stCls(r.st)}">${r.rem.map(esc).join(' ')}</span></td><td class="l">${r.flags.map(x=>`<span class="flagtxt">${esc(x)}</span>`).join(' ')}</td>${cmpCells(p,r)}</tr>`;});
   $('#tbl').innerHTML=h+'</tbody>';
 }
@@ -1122,7 +1268,8 @@ $('#mLinked').onclick=()=>setMode(true);$('#mSingle').onclick=()=>setMode(false)
 $('#bUndo').onclick=doUndo;$('#bRedo').onclick=doRedo;
 function loadSeed(){const sheets=JSON.parse($('#seedBC').textContent);loadSheets(sheets,{fileName:'BC (업로드 자료)'});}
 $('#bSeed').onclick=()=>loadSeed();
-$('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';doc.rpt=new Map();ui.cmp=false;ui.qd=false;edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});snapBase();selectRoute(routesOf(pipes).keys().next().value);};
+$('#bStorm').onclick=()=>{loadSheets(JSON.parse($('#seedStorm').textContent),{fileName:'우수 예제 (PipeTools 샘플)'});$('#dlg').hidden=true;};
+$('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';doc.rpt=new Map();doc.rain=null;applyModeDefaults();ui.cmp=false;ui.qd=false;edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});snapBase();selectRoute(routesOf(pipes).keys().next().value);};
 $('#cCovMode').addEventListener('change',e=>{crit.coverMode=e.target.value;render();});
 const CRIT_IDS={cVmin:'vmin',cVmax:'vmax',cVlow:'vlow',cCover:'cover',cClear:'clear'};
 Object.keys(CRIT_IDS).forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
@@ -1165,7 +1312,10 @@ function loadSheets(sheets,opt={}){
   hyds.forEach(x=>errs.push(...x.h.errs.map(e=>`[${x.name}] ${e}`)));
   if(errs.length)return{errs};
   if(hyds.length>1){warn.push(`수리계산 시트가 ${hyds.length}개 있어 첫 번째 '${hyds[0].name}'만 사용 (나머지: ${hyds.slice(1).map(x=>x.name).join(', ')})`);hyds.length=1;}
-  if(hyds[0]&&hyds[0].h.type1>1)warn.push(`TYPE1=${hyds[0].h.type1} (${hyds[0].h.type1===2?'우수':'합류'}) 자료입니다. 지금은 오수 원단위식만 계산하므로 우수량은 0으로 계산됩니다.`);
+  if(hyds[0]){const rn=hyds[0].h.rain;doc.rain=rn.type1>1?rn:null;
+    if(rn.type1>1&&!(rn.type3>=1&&rn.type3<=8))warn.push(`강우강도 TYPE3=${rn.type3} (${RAIN_TYPES[rn.type3]||'알 수 없음'})는 아직 계산하지 않습니다. 우수량이 0으로 나옵니다.`);
+    if(rn.type1>1&&rn.type2>1)warn.push('TYPE2=2 (부등류) 자료입니다. 지금은 등류로 계산합니다.');}
+  else if(!opt.keepHyd&&!opt.keepProfiles)doc.rain=null;
   let hyd=hyds.flatMap(x=>x.h.pipes);
   const fromCurrent=!hyd.length&&opt.keepHyd;
   if(fromCurrent)hyd=clone(pipes);
@@ -1186,12 +1336,19 @@ function loadSheets(sheets,opt={}){
   const all=[...geoAll,...rest];
   return applyLoaded(all,warn,hyds[0]?.h.head||(opt.keepProfiles?null:doc.hydHead),opt.fileName||'붙여넣기',profMap,opt.keepProfiles&&!profs.length);
 }
+// 계산 대상에 맞는 판정 기준 기본값: 오수 0.6~3.0 (0.3 미만 NG), 우수·합류 0.8~3.0
+function applyModeDefaults(){
+  const storm=doc.rain&&doc.rain.type1>1;
+  Object.assign(crit,storm?{vmin:0.8,vlow:0.8,vmax:3.0}:{vmin:0.6,vlow:0.3,vmax:3.0});
+  if(storm)ui.qd=false;
+  $('#cVmin').value=crit.vmin;$('#cVlow').value=crit.vlow;$('#cVmax').value=crit.vmax;
+}
 function applyLoaded(np,warn,hydHead,name,profMap=new Map(),keepProf=false){
   if(!np.length)return{errs:['관로를 만들지 못했습니다.']};
   PT.unifyNodes(np);
   const ids=new Set();np.forEach(p=>{if(ids.has(p.id))p.id=p.id+'·'+p.line;ids.add(p.id);});
   if(!keepProf){doc.profiles=profMap;}
-  doc.hydHead=hydHead;doc.file=name;ui.range=null;
+  doc.hydHead=hydHead;doc.file=name;ui.range=null;applyModeDefaults();
   edit(()=>{pipes=np;ui.yFrame=null;});snapBase();
   routes=routesOf(pipes);selectRoute(routes.keys().next().value);
   const nProf=doc.profiles.size;
@@ -1312,4 +1469,5 @@ render();
 // 처음 화면: 업로드 자료(BC). 읽기 모듈과 무관하게 시트 값을 내장해 둠
 document.addEventListener('DOMContentLoaded',()=>{try{loadSeed();undo.length=0;redo.length=0;render();}catch(err){console.error(err);}});
 </script>
+<script type="application/json" id="seedStorm">[{"name":"PipeTools_표준(등류)","rows":[["TYPE1","TYPE2","TYPE3","a1","b1","c1","a2","b2","c2","t1","t2"],[2,1,1,938.8515,0.589,2.4701,757.7476,0.5809,2.1589,5,10],["노 선 명","관 번 호","상류맨홀","하류맨홀","관 연 장","각선면적","폭","높이","련","상류지반","하류지반","상류관저","하류관저","조도계수","유출계수","유입유량","유입시간","비    고","인구밀도","오수단위","지하단위","P.F","X1","Y1","X2","Y2","구간","관종","지장물","맨홀","","","","방류검토","BackDrop","유입관저고","관번호","","","관번호","순번","라인명"],["GD-01","GD-01-001","GD-01-001","GD-01-002",17,0.25,"",500,"",37.5,37.330000000000005,35.8,35.63,0.01,0.8,"","","","","","","",17,100,"","","","","","","","","","","","","","","","GD-01-001",0,"S-001"],["GD-01","GD-01-002","GD-01-002","GD-01-003",23,0.09,"",500,"",37.330000000000005,37.1,35.63,35.4,"","","","","","","","","",40,100,"","","","","","","","","","","","","","","","GD-01-002",1,"S-001"],["GD-01","GD-01-003","GD-01-003","GD-01-004",42,0.15,"",500,"",37.1,36.68,35.4,34.98,"","","","","","","","","",82,100,"","","","","","","","","","","","","","","","GD-01-003",2,"S-001"],["GD-01","GD-01-004","GD-01-004","GD-01-005",23,0.09,"",500,"",36.68,36.45,34.98,34.75,"","","","","","","","","",105,100,"","","","","","","","","","","","","","","","GD-01-004",3,"S-001"],["GD-01","GD-01-005","GD-01-005","GD-01-006",49,0.34,"",500,"",36.45,35.96,34.75,34.26,"","","","","","","","","",154,100,"","","","","","","","","","","","","","","","GD-01-005",4,"S-001"],["GD-01","GD-01-006","GD-01-006","GD-01-007",9,0.09,"",500,"",35.96,35.870000000000005,34.26,34.17,"","","","","","","","","",163,100,"","","","","","","","","","","","","","","","GD-01-006",5,"S-001"],["GD-01","GD-01-007","GD-01-007","GD-01-008",53,0.44,"",700,"",35.870000000000005,35.300000000000004,34.17,33.6,"","","","","","","","","",216,100,"","","","","","","","","","","","","","","","GD-01-007",6,"S-001"],["GD-01","GD-01-008","GD-01-008","GD-01-009",53,0.51,"",700,"",35.010000000000005,34.57,33.31,32.87,"","","","","","","","","",269,100,"","","","","","","","","","","","","","","","GD-01-008",7,"S-001"],["GD-01","GD-01-009","GD-01-009","GD-01-010",69,5,1,1,1,34.550000000000004,34.27,32.85,32.57,"","","","","","","","","",338,100,"","","","","","","","","","","","","","","","GD-01-009",8,"S-001"],["GD-01","GD-01-010","GD-01-010","GD-01-011",67,0.3,1,1,1,34.27,33.970000000000006,32.57,32.27,"","","","","","","","","",405,100,"","","","","","","","","","","","","","","","GD-01-010",9,"S-001"],["GD-01","GD-01-011","GD-01-011","GD-01-012",59,0.22,1,1,1,33.970000000000006,33.49,32.27,31.79,"","","","","","","","","",464,100,"","","","","","","","","","","","","","","","GD-01-011",10,"S-001"],["GD-01","GD-01-012","GD-01-012","GD-01-013",27,0.09,1,1,1,33.31,33.2,31.61,31.5,"","","","","","","","","",491,100,"","","","","","","","","","","","","","","","GD-01-012",11,"S-001"],["GD-01","GD-01-013","GD-01-013","GD-01-014",43,0.21,1,1,1,33.2,32.97,31.5,31.27,"","","","","","","","","",534,100,"","","","","","","","","","","","","","","","GD-01-013",12,"S-001"],["GD-01","GD-01-014","GD-01-014","GD-M/P",9,0.05,1,1,1,32.97,32.82,31.27,31.12,"","","","","FIXED=32.5","","","","",543,100,552,100,"","","","","","","","방류구","","","","","","GD-01-014",13,"S-001"]]},{"name":"PipeTools_표준(등류)(rpt)","rows":[["▶ PipeTools_표준(등류) 관망계산summary","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","OUT Q=",2.31422,"CMS"],["관로","대상","상류","하류","관로","관제원","","","상류","하류","상류","하류","관로","각선","누가","유출","평균","유달","강우","만관","만관","최대","최대","허용","허용","유입유량","","","누가유입유량","","","실유량","실유속","실수심","유량비","수심비","설계","설계","설계","기타","월류","BACK","유입","도면"],["노선","관로","맨홀","맨홀","연장","폭","높이","련","지반고","지반고","관저고","관저고","경사","면적","면적","계수","유출계수","시간","강도","유량","유속","유량","유속","유량","유속","오수량","우수량","직접유량","오수량","우수량","직접유량","","","","","","여유율","유속","토피","사항","유량","DROP","관로","레이어"],["번호","번호","번호","번호","(m)","(m)","(mm,m)","(ea)","(El.m)","(El.m)","(El.m)","(El.m)","(‰)","(ha)","(ha)","(C)","(AvgC)","(min)","(mm/hr)","(㎥/sec)","(m/s)","(㎥/sec)","(m/s)","(㎥/sec)","(m/s)","(㎥/sec)","(㎥/sec)","(㎥/sec)","(㎥/sec)","(㎥/sec)","(㎥/sec)","(㎥/sec)","(m/s)","(m)","(%)","(%)","검토","검토","검토","검토","검토","검토","검토","상태"],["S-001","GD-01-001","GD-01-001","GD-01-002",17,"",500,"",37.5,37.33,35.8,35.63,10,0.25,0.25,0.8,0.8,10.16,126.209,0.49087,2.5,0.52743,2.772,0.49087,2.5,0,0.07012,0,0,0.07012,0,0.07012,1.772,0.1277,14.284,25.54,"GOOD","GOOD","GOOD"],["S-001","GD-01-002","GD-01-002","GD-01-003",23,"",500,"",37.33,37.1,35.63,35.4,10,0.09,0.34,0.8,0.8,10.358,125.301,0.49087,2.5,0.52743,2.772,0.49087,2.5,0,0.02456,0,0,0.09467,0,0.09467,1.931,0.149,19.286,29.79,"GOOD","GOOD","GOOD"],["S-001","GD-01-003","GD-01-003","GD-01-004",42,"",500,"",37.1,36.68,35.4,34.98,10,0.15,0.49,0.8,0.8,10.687,123.845,0.49087,2.5,0.52743,2.772,0.49087,2.5,0,0.04018,0,0,0.13485,0,0.13485,2.133,0.1791,27.472,35.82,"GOOD","GOOD","GOOD"],["S-001","GD-01-004","GD-01-004","GD-01-005",23,"",500,"",36.68,36.45,34.98,34.75,10,0.09,0.58,0.8,0.8,10.858,123.103,0.49087,2.5,0.52743,2.772,0.49087,2.5,0,0.02381,0,0,0.15867,0,0.15867,2.229,0.1955,32.323,39.11,"GOOD","GOOD","GOOD"],["S-001","GD-01-005","GD-01-005","GD-01-006",49,"",500,"",36.45,35.96,34.75,34.26,10,0.34,0.92,0.8,0.8,11.184,121.735,0.49087,2.5,0.52743,2.772,0.49087,2.5,0,0.09021,0,0,0.24888,0,0.24888,2.508,0.2521,50.701,50.43,"GOOD","GOOD","GOOD"],["S-001","GD-01-006","GD-01-006","GD-01-007",9,"",500,"",35.96,35.87,34.26,34.17,10,0.09,1.01,0.8,0.8,11.243,121.494,0.49087,2.5,0.52743,2.772,0.49087,2.5,0,0.02381,0,0,0.27269,0,0.27269,2.565,0.2663,55.551,53.26,"GOOD","GOOD","GOOD"],["S-001","GD-01-007","GD-01-007","GD-01-008",53,"",700,"",35.87,35.3,34.17,33.6,10.75,0.44,1.45,0.8,0.8,11.539,140.273,1.24866,3.245,1.34166,3.597,1.24866,3.245,0,0.1793,0,0,0.45199,0,0.45199,2.982,0.2914,36.198,41.63,"GOOD","GOOD","GOOD"],["S-001","GD-01-008","GD-01-008","GD-01-009",53,"",700,"",35.01,34.57,33.31,32.87,8.3,0.51,1.96,0.8,0.8,11.841,138.926,1.09707,2.851,1.17877,3.161,1.09707,2.851,0,0.15311,0,0,0.6051,0,0.6051,2.919,0.3712,55.156,53.03,"GOOD","GOOD","GOOD"],["S-001","GD-01-009","GD-01-009","GD-01-010",69,1,1,1,34.55,34.27,32.85,32.57,4.06,5,6.96,0.8,0.8,12.245,137.191,3.06248,3.062,3.06248,3.062,3.06248,3.062,0,1.51678,0,0,2.12188,0,2.12188,2.849,0.7447,69.286,74.47,"GOOD","GOOD","NG"],["S-001","GD-01-010","GD-01-010","GD-01-011",67,1,1,1,34.27,33.97,32.57,32.27,4.48,0.3,7.26,0.8,0.8,12.62,135.639,3.21694,3.217,3.21694,3.217,3.21694,3.217,0,0.06642,0,0,2.18831,0,2.18831,2.981,0.734,68.025,73.4,"GOOD","GOOD","NG"],["S-001","GD-01-011","GD-01-011","GD-01-012",59,1,1,1,33.97,33.49,32.27,31.79,8.14,0.22,7.48,0.8,0.8,12.88,134.592,4.33624,4.336,4.33624,4.336,4.33624,4.336,0,0.04891,0,0,2.23721,0,2.23721,3.778,0.5922,51.593,59.22,"GOOD","NG(V)3.0↑","NG"],["S-001","GD-01-012","GD-01-012","GD-01-013",27,1,1,1,33.31,33.2,31.61,31.5,4.07,0.09,7.57,0.8,0.8,13.036,133.977,3.06855,3.069,3.06855,3.069,3.06855,3.069,0,0.01658,0,0,2.25379,0,2.25379,2.89,0.7799,73.448,77.99,"GOOD","GOOD","NG"],["S-001","GD-01-013","GD-01-013","GD-01-014",43,1,1,1,33.2,32.97,31.5,31.27,5.35,0.21,7.78,0.8,0.8,13.257,133.116,3.516,3.516,3.516,3.516,3.516,3.516,0,0.04764,0,0,2.30143,0,2.30143,3.232,0.7121,65.456,71.21,"GOOD","NG(V)3.0↑","NG"],["S-001","GD-01-014","GD-01-014","GD-M/P",9,1,1,1,32.97,32.82,31.27,31.12,16.67,0.05,7.83,0.8,0.8,13.287,133.001,6.20645,6.206,6.20645,6.206,6.20645,6.206,0,0.01278,0,0,2.31422,0,2.31422,4.993,0.4635,37.287,46.35,"GOOD","NG(V)3.0↑","NG","방류구"]]}]</script>
 <script type="application/json" id="seedBC">[{"name":"PipeTools(BC)(rpt)","rows":[["▶ PipeTools(BC) 관망계산summary","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","","OUT Q=",154.57,"CMD"],["관로","대상","상류","하류","관로","관제원","","","상류","하류","상류","하류","관로","각선","누가","유출","평균","유달","강우","만관","만관","최대","최대","허용","허용","유입유량","","","누가유입유량","","","실유량","실유속","실수심","유량비","수심비","설계","설계","설계","기타","월류","BACK","유입","도면","관로개량계획"],["노선","관로","맨홀","맨홀","연장","폭","높이","련","지반고","지반고","관저고","관저고","경사","면적","면적","계수","유출계수","시간","강도","유량","유속","유량","유속","유량","유속","오수량","우수량","직접유량","오수량","우수량","직접유량","","","","","","여유율","유속","토피","사항","유량","DROP","관로","레이어","폭","높이","련","구배","유속","유량비","수심비","판별"],["번호","번호","번호","번호","(m)","(m)","(mm,m)","(ea)","(El.m)","(El.m)","(El.m)","(El.m)","(‰)","(ha)","(ha)","(C)","(AvgC)","(min)","(mm/hr)","(㎥/d)","(m/s)","(㎥/d)","(m/s)","(㎥/d)","(m/s)","(㎥/d)","(㎥/d)","(㎥/d)","(㎥/d)","(㎥/d)","(㎥/d)","(㎥/d)","(m/s)","(m)","(%)","(%)","검토","검토","검토","검토","검토","검토","검토","상태","(m)","(m,mm)","(EA)","(‰)","(m/s)","(%)","(%)"],["BC","BC-01","BC-01","BC-02",10,"",200,1,46.55,46.47,45.2,45.07,13,0,0,0.8,0,0,0,3818.87793,1.407,4103.30223,1.56,3818.87793,1.407,0,0,154.57,0,0,154.57,154.57,0.689,0.0274,4.048,13.71,"GOOD","GOOD","GOOD"],["BC","BC-02","BC-02","BC-03",50,"",200,1,46.47,45.7,45.07,44.5,11.4,0,0,0.8,0,0,0,3576.12158,1.317,3842.46575,1.461,3576.12158,1.317,0,0,0,0,0,154.57,154.57,0.66,0.0283,4.322,14.13,"GOOD","GOOD","GOOD"],["BC","BC-03","BC-03","BC-04",50,"",200,1,45.7,44.74,44.5,43.54,19.2,0,0,0.8,0,0,0,4641.26514,1.71,4986.9396,1.896,4641.26514,1.71,0,0,0,0,0,154.57,154.57,0.793,0.0249,3.33,12.45,"GOOD","GOOD","GOOD"],["BC","BC-04","BC-04","BC-05",50,"",200,1,44.74,43.53,43.54,42.33,24.2,0,0,0.8,0,0,0,5210.95166,1.92,5599.05552,2.129,5210.95166,1.92,0,0,0,0,0,154.57,154.57,0.86,0.0236,2.966,11.78,"GOOD","GOOD","GOOD"],["BC","BC-05","BC-05","BC-06",50,"",200,1,43.53,42.26,42.33,41.06,25.4,0,0,0.8,0,0,0,5338.66504,1.967,5736.2808,2.181,5338.66504,1.967,0,0,0,0,0,154.57,154.57,0.874,0.0233,2.895,11.65,"GOOD","GOOD","GOOD"],["BC","BC-06","BC-06","BC-07",50,"",200,1,42.26,41.73,41.06,40.53,10.6,0,0,0.8,0,0,0,3448.34619,1.27,3705.17384,1.409,3448.34619,1.27,0,0,0,0,0,154.57,154.57,0.643,0.0288,4.482,14.38,"GOOD","GOOD","GOOD"],["BC","BC-07","BC-07","BC-08",50,"",200,1,41.73,41.14,40.53,39.94,11.8,0,0,0.8,0,0,0,3638.32813,1.34,3909.30535,1.486,3638.32813,1.34,0,0,0,0,0,154.57,154.57,0.668,0.028,4.248,14.02,"GOOD","GOOD","GOOD"],["BC","BC-08","BC-08","BC-09",40,"",200,1,41.14,40.41,39.94,39.21,18.25,0,0,0.8,0,0,0,4524.94531,1.667,4861.95645,1.848,4524.94531,1.667,0,0,0,0,0,154.57,154.57,0.778,0.0252,3.416,12.61,"GOOD","GOOD","GOOD"],["BC","BC-09","BC-09","BC-10",29,"",200,1,40.41,39.56,39.21,38.46,25.86,0,0,0.8,0,0,0,5387.0376,1.985,5788.25608,2.201,5387.0376,1.985,0,0,0,0,0,154.57,154.57,0.879,0.0232,2.869,11.6,"GOOD","GOOD","GOOD"],["BC","BC-10","BC-10","BC-11",30,"",200,1,39.56,39.17,38.46,37.97,16.33,0,0,0.8,0,0,0,4280.67383,1.577,4599.49199,1.749,4280.67383,1.577,0,0,0,0,0,154.57,154.57,0.747,0.0259,3.611,12.97,"GOOD","GOOD","NG"],["BC","BC-11","BC-11","BC-12",40,"",200,1,39.17,38.71,37.97,37.51,11.5,0,0,0.8,0,0,0,3591.77417,1.323,3859.28412,1.467,3591.77417,1.323,0,0,0,0,0,154.57,154.57,0.662,0.0282,4.303,14.11,"GOOD","GOOD","GOOD"],["BC","BC-12","BC-12","BC-13",40,"",200,1,38.71,38.17,37.51,36.97,13.5,0,0,0.8,0,0,0,3891.6377,1.434,4181.48103,1.59,3891.6377,1.434,0,0,0,0,0,154.57,154.57,0.698,0.0272,3.972,13.6,"GOOD","GOOD","GOOD"],["BC","BC-13","BC-13","BC-14",30,"",200,1,38.17,37.62,36.97,36.42,18.33,0,0,0.8,0,0,0,4535.26807,1.671,4873.04803,1.853,4535.26807,1.671,0,0,0,0,0,154.57,154.57,0.78,0.0252,3.408,12.59,"GOOD","GOOD","GOOD"],["BC","BC-14","BC-14","BC-15",50,"",200,1,37.62,36.66,36.42,35.46,19.2,0,0,0.8,0,0,0,4641.26514,1.71,4986.9396,1.896,4641.26514,1.71,0,0,0,0,0,154.57,154.57,0.793,0.0249,3.33,12.45,"GOOD","GOOD","GOOD"],["BC","BC-15","BC-15","BC-16",75,"",200,1,36.66,35.55,35.46,34.45,13.47,0,0,0.8,0,0,0,3886.82935,1.432,4176.31457,1.588,3886.82935,1.432,0,0,0,0,0,154.57,154.57,0.697,0.0272,3.977,13.6,"GOOD","GOOD","GOOD"],["BC","BC-16","BC-16","BC-17",75,"",200,1,35.55,34.82,34.45,33.72,9.73,0,0,0.8,0,0,0,3304.35596,1.217,3550.45943,1.35,3304.35596,1.217,0,0,0,0,0,154.57,154.57,0.624,0.0294,4.678,14.68,"GOOD","GOOD","NG"],["BC","BC-17","BC-17","BC-18",75,"",200,1,34.82,34.49,33.72,33.39,4.4,0,0,0.8,0,0,0,2221.64258,0.818,2387.10718,0.908,2221.64258,0.818,0,0,0,0,0,154.57,154.57,0.471,0.0357,6.957,17.85,"GOOD","유지관리","NG"],["BC","BC-18","BC-18","BC-19",50,"",200,1,34.49,34.13,33.39,33.28,2.2,0,0,0.8,0,0,0,1570.93274,0.579,1687.93345,0.642,1570.93274,0.579,0,0,0,0,0,154.57,154.57,0.369,0.0423,9.839,21.17,"GOOD","유지관리","NG"],["BC","BC-19","BC-19","BC-20",6,"",200,1,34.13,33.82,33.28,33.23,8.33,0,0,0.8,0,0,0,3057.47314,1.126,3285.18916,1.249,3057.47314,1.126,0,0,0,0,0,154.57,154.57,0.59,0.0305,5.055,15.26,"GOOD","유지관리","NG"],["BC","BC-20","BC-20","BC-21",42,"",200,1,33.82,33.66,33.23,33.01,5.24,0,0,0.8,0,0,0,2424.01563,0.893,2604.55267,0.99,2424.01563,0.893,0,0,0,0,0,154.57,154.57,0.496,0.0344,6.377,17.21,"GOOD","유지관리","NG"],["BC","BC-21","BC-21","BC-22",5,"",200,1,33.66,33.83,33.01,32.93,16,0,0,0.8,0,0,0,4236.75684,1.561,4552.30413,1.731,4236.75684,1.561,0,0,0,0,0,154.57,154.57,0.741,0.0261,3.648,13.03,"GOOD","GOOD","NG"],["BC","BC-22","BC-22","BC-23",75,"",200,1,33.83,33.43,32.93,32.43,6.67,0,0,0.8,0,0,0,2734.67017,1.007,2938.3443,1.117,2734.67017,1.007,0,0,0,0,0,154.57,154.57,0.544,0.0323,5.652,16.15,"GOOD","유지관리","NG"],["BC","BC-23","BC-23","BC-24",75,"",200,1,33.43,33,32.43,32.25,2.4,0,0,0.8,0,0,0,1640.78613,0.604,1762.98942,0.67,1640.78613,0.604,0,0,0,0,0,154.57,154.57,0.38,0.0414,9.42,20.72,"GOOD","유지관리","NG"],["BC","BC-24","BC-24","BC-25",75,"",200,1,33,32.54,32.25,31.44,10.8,0,0,0.8,0,0,0,3480.72949,1.282,3739.969,1.422,3480.72949,1.282,0,0,0,0,0,154.57,154.57,0.648,0.0286,4.441,14.32,"GOOD","GOOD","NG"],["BC","BC-25","BC-25","BC-26",75,"",200,1,32.54,32.14,31.44,31.14,4,0,0,0.8,0,0,0,2118.25122,0.78,2276.01539,0.865,2118.25122,0.78,0,0,0,0,0,154.57,154.57,0.456,0.0365,7.297,18.26,"GOOD","유지관리","NG"],["BC","BC-26","BC-26","BC-27",36,"",200,1,32.14,31.99,31.14,31.09,1.39,0,0,0.8,0,0,0,1248.18713,0.46,1341.15024,0.51,1248.18713,0.46,0,0,0,0,0,154.57,154.57,0.313,0.0475,12.384,23.76,"GOOD","유지관리","NG"],["BC","BC-27","BC-27","BC-28",52,"",200,1,31.99,31.7,31.09,31.05,0.77,0,0,0.8,0,0,0,928.91107,0.342,998.09498,0.379,928.91107,0.342,0,0,0,0,0,154.57,154.57,0.253,0.0552,16.64,27.61,"GOOD","NG(V)0.3↓","NG"],["BC","BC-28","BC-28","BC-29",20,"",200,1,31.7,31.65,31.05,31,2.5,0,0,0.8,0,0,0,1674.62061,0.617,1799.34384,0.684,1674.62061,0.617,0,0,0,0,0,154.57,154.57,0.386,0.041,9.23,20.51,"GOOD","유지관리","NG"],["BC","BC-29","BC-29","BC-30",16,"",200,1,31.65,31.96,31,30.96,2.5,0,0,0.8,0,0,0,1674.62061,0.617,1799.34384,0.684,1674.62061,0.617,0,0,0,0,0,154.57,154.57,0.386,0.041,9.23,20.51,"GOOD","유지관리","NG"],["BC","BC-30","BC-30","BC-31",14,"",200,1,31.96,32.46,30.96,30.91,3.57,0,0,0.8,0,0,0,2001.55762,0.737,2150.63063,0.818,2001.55762,0.737,0,0,0,0,0,154.57,154.57,0.438,0.0375,7.722,18.77,"GOOD","유지관리","NG","방류구"]]},{"name":"PipeTools(BC)","rows":[["TYPE1","TYPE2","TYPE3"],[1,1,1],["노 선 명","관 번 호","상류맨홀","하류맨홀","관 연 장","각선면적","폭","높이","련","상류지반","하류지반","상류관저","하류관저","조도계수","유출계수","유입유량","유입시간","비    고","인구밀도","오수단위","지하단위","P.F","X1","Y1","X2","Y2","구간","관종","지장물","맨홀","단차","vertex","레이어"],["BC","BC-01","BC-01","BC-02",10,"","",200,"",46.55,46.47,45.2,45.07,0.011,"",0.0017890046296296295,"","","","","","",170867.265625,53858.7109375,170857.890625,53862.1953125,"OP02,10","PE","2.3,45.46,65,상수","2호"],["BC","BC-02","BC-02","BC-03",50,"","",200,"",46.47,45.7,45.07,44.5,"","","","","","","","","",170857.890625,53862.1953125,170857.59375,53912.1953125,"OP02,50","PE","","2호"],["BC","BC-03","BC-03","BC-04",50,"","",200,"",45.7,44.74,44.5,43.54,"","","","","","","","","",170857.59375,53912.1953125,170861.015625,53962.078125,"OP02,50","PE","","2호"],["BC","BC-04","BC-04","BC-05",50,"","",200,"",44.74,43.53,43.54,42.33,"","","","","","","","","",170861.015625,53962.078125,170866.515625,54011.7734375,"OP02,50","PE","","2호"],["BC","BC-05","BC-05","BC-06",50,"","",200,"",43.53,42.26,42.33,41.06,"","","","","","","","","",170866.515625,54011.7734375,170871.1875,54061.5546875,"OP02,50","PE","","2호"],["BC","BC-06","BC-06","BC-07",50,"","",200,"",42.26,41.73,41.06,40.53,"","","","","","","","","",170871.1875,54061.5546875,170866.46875,54111.33203125,"OP02,50","PE","","2호"],["BC","BC-07","BC-07","BC-08",50,"","",200,"",41.73,41.14,40.53,39.94,"","","","","","","","","",170866.46875,54111.33203125,170866.765625,54161.33203125,"OP02,50","PE","","2호"],["BC","BC-08","BC-08","BC-09",40,"","",200,"",41.14,40.41,39.94,39.21,"","","","","","","","","",170866.765625,54161.33203125,170865.78125,54201.3203125,"OP02,40","PE","36,39.51,150,상수","2호"],["BC","BC-09","BC-09","BC-10",29,"","",200,"",40.41,39.56,39.21,38.46,"","","","","","","","","",170865.78125,54201.3203125,170852.328125,54227.01171875,"OP02,29","PE","11.65,37.1,1000,우수;19.67,38.2,260,동복발전;19.67,37.84,260,동복발전;19.89,38.54,130,동복발전;20,38.2,260,동복발전;20,37.84,260,동복발전;20.1,38.54,130,동복발전;20.3,38.2,260,동복발전;20.3,37.84,260,동복발전;20.4,39,50,통신;20.6,39,50,통신","2호"],["BC","BC-10","BC-10","BC-11",30,"","",200,"",39.56,39.17,38.46,37.97,"","","","","","","","","",170852.328125,54227.01171875,170823.09375,54220.26953125,"OP02,30","PE","","2호"],["BC","BC-11","BC-11","BC-12",40,"","",200,"",39.17,38.71,37.97,37.51,"","","","","","","","","",170823.09375,54220.26953125,170783.734375,54213.16796875,"OP02,40","PE","","2호"],["BC","BC-12","BC-12","BC-13",40,"","",200,"",38.71,38.17,37.51,36.97,"","","","","","","","","",170783.734375,54213.16796875,170744.03125,54208.19921875,"OP02,40","PE","","2호"],["BC","BC-13","BC-13","BC-14",30,"","",200,"",38.17,37.62,36.97,36.42,"","","","","","","","","",170744.03125,54208.19921875,170714.109375,54206.140625,"OP02,30","PE","","2호"],["BC","BC-14","BC-14","BC-15",50,"","",200,"",37.62,36.66,36.42,35.46,"","","","","","","","","",170714.109375,54206.140625,170664.125,54207.09765625,"OP02,50","PE","38.5,36.02,50,통신","2호"],["BC","BC-15","BC-15","BC-16",75,"","",200,"",36.66,35.55,35.46,34.45,"","","","","","","","","",170664.125,54207.09765625,170589.125,54205.8046875,"OP02,75","PE","","2호"],["BC","BC-16","BC-16","BC-17",75,"","",200,"",35.55,34.82,34.45,33.72,"","","","","","","","","",170589.125,54205.8046875,170514.15625,54203.71484375,"OP02,75","PE","","2호"],["BC","BC-17","BC-17","BC-18",75,"","",200,"",34.82,34.49,33.72,33.39,"","","","","","","","","",170514.15625,54203.71484375,170439.1875,54201.88671875,"OP02,75","PE","","2호"],["BC","BC-18","BC-18","BC-19",50,"","",200,"",34.49,34.13,33.39,33.28,"","","","","","","","","",170439.1875,54201.88671875,170389.203125,54200.58203125,"OP02-B,50","PE","","2호"],["BC","BC-19","BC-19","BC-20",6,"","",200,"",34.13,33.82,33.28,33.23,"","","","","","","","","",170389.203125,54200.58203125,170385.0625,54196.23046875,"OP02-B,6","PE","","2호"],["BC","BC-20","BC-20","BC-21",42,"","",200,"",33.82,33.66,33.23,33.01,"","","","","","","","","",170385.0625,54196.23046875,170343.078125,54195.13671875,"OP02,42","PE","","2호"],["BC","BC-21","BC-21","BC-22",5,"","",200,"",33.66,33.83,33.01,32.93,"","","","","","","","","",170343.078125,54195.13671875,170339.453125,54198.578125,"OP02-B,5","PE","","2호"],["BC","BC-22","BC-22","BC-23",75,"","",200,"",33.83,33.43,32.93,32.43,"","","","","","","","","",170339.453125,54198.578125,170264.484375,54196.625,"OP02-B,75","PE","","2호"],["BC","BC-23","BC-23","BC-24",75,"","",200,"",33.43,33,32.43,32.25,"","","","","","","","","",170264.484375,54196.625,170189.5,54194.671875,"OP02,75","PE","","2호"],["BC","BC-24","BC-24","BC-25",75,"","",200,"",33,32.54,32.25,31.44,"","","","","","","","","",170189.5,54194.671875,170114.8125,54187.96875,"OP02-B,75","PE","5.70000000000005,31.14,1000,기존관;45.5999999999999,30.23,1200,기존관","2호"],["BC","BC-25","BC-25","BC-26",75,"","",200,"",32.54,32.14,31.44,31.14,"","","","","","","","","",170114.8125,54187.96875,170039.828125,54186.02734375,"OP02,75","PE","44.4000000000001,31.48,50,통신;44.5999999999999,31.48,50,통신","2호"],["BC","BC-26","BC-26","BC-27",36,"","",200,"",32.14,31.99,31.14,31.09,"","","","","","","","","",170039.828125,54186.02734375,170003.953125,54188.9296875,"OP02-B,36","PE","","2호"],["BC","BC-27","BC-27","BC-28",52,"","",200,"",31.99,31.7,31.09,31.05,"","","","","","","","","",170003.953125,54188.9296875,169951.96875,54187.4453125,"OP02-B,52","PE","","2호"],["BC","BC-28","BC-28","BC-29",20,"","",200,"",31.7,31.65,31.05,31,"","","","","","","","","",169951.96875,54187.4453125,169938.578125,54172.59765625,"OP02-B,20","PE","","2호"],["BC","BC-29","BC-29","BC-30",16,"","",200,"",31.65,31.96,31,30.96,"","","","","","","","","",169938.578125,54172.59765625,169936.859375,54156.6875,"OP02-B,16","PE","3,30.43,250,상수","2호"],["BC","BC-30","BC-30","BC-31",14,"","",200,"",31.96,32.46,30.96,30.91,"","","","","","","","","",169936.859375,54156.6875,169922.859375,54157.0390625,"OP02,14","PE","0.799999999999955,30.84,100,상수;8.5,31.41,50,통신;8.5,29.22,1.34*1.34,한국전력;9.59999999999991,31.15,150,상수","2호"]]},{"name":"종단파일","rows":[["","HScale","Vscale","chain","시작지반","Type","종단분할","라인명","관종","맨홀INV"],["",500,100,20,25,"A",340,"SD","PE",0],["","누가거리","지반고","관저고","관경","맨홀","TEXT1","TEXT2","구간","구배","INV","SIZE","라인명","관방향","관번호","관  종","지하수위","풍화암","연  암","관기초","굴착장비","VIP","VCL","FH","X1","Y1","L지반","R지반","L포장","R포장","L건물","R건물","INV2","DIA2","지장물1","지장물2","지장물3","지장물4","병행OFFSET"],["P",0,46.55,45.2,200,"M2-SD-01","","","OP02",0.3,"","","","","","","","","","","","","","",170867.2706124953,53858.71102179386,"","","","","","","","","","","","","","","","","No.0",46.22,"M2-SD-01"],["P",10,46.47,45.06999999999999,200,"M2-SD-02","","","OP02",0.3,"","","","","","","","","","","","","","",170857.89743004512,53862.19576723014,"","","","","","","","","","","","","","","","","No.0+10.0",46.47,"M2-SD-02"],["",20,46.34,44.96,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170857.83519809367,53872.195573587465,"","","","","","","","","","","","","","","","","No.1",46.34],["",40,45.92,44.73,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170857.71073419074,53892.19518630214,"","","","","","","","","","","","","","","","","No.2",45.92],["P",60,45.7,44.5,200,"M2-SD-03","","","OP02",0.3,"","","","","","","","","","","","","","",170857.5862702878,53912.19479901683,"","","","","","","","","","","","","","","","","No.3",45.7,"M2-SD-03"],["",80,45.15,44.12,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170858.95559848292,53932.14786745989,"","","","","","","","","","","","","","","","","No.4",45.15],["",100,44.9,43.73,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170860.324926678,53952.10093590296,"","","","","","","","","","","","","","","","","No.5",44.9],["P",110,44.74,43.54,200,"M2-SD-04","","","OP02",0.3,"","","","","","","","","","","","","","",170861.00959077536,53962.077470121454,"","","","","","","","","","","","","","","","","No.5+10.0",44.74,"M2-SD-04"],["",120,44.69,43.3,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170862.11001291918,53972.01673926795,"","","","","","","","","","","","","","","","","No.6",44.69],["",140,44.21,42.81,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170864.31085720615,53991.89527755487,"","","","","","","","","","","","","","","","","No.7",44.21],["P",160,43.53,42.33,200,"M2-SD-05","","","OP02",0.3,"","","","","","","","","","","","","","",170866.5117014928,54011.77381583874,"","","","","","","","","","","","","","","","","No.8",43.53,"M2-SD-05"],["",180,42.92,41.82,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170868.38019755433,54031.68634261438,"","","","","","","","","","","","","","","","","No.9",42.92],["",200,42.41,41.31,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170870.2486936156,54051.59886938697,"","","","","","","","","","","","","","","","","No.10",42.41],["P",210,42.26,41.059999999999995,200,"M2-SD-06","","","OP02",0.3,"","","","","","","","","","","","","","",170871.18294164594,54061.55513277012,"","","","","","","","","","","","","","","","","No.10+10.0",42.26,"M2-SD-06"],["",220,42.02,40.95,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170870.2416383304,54071.51073160351,"","","","","","","","","","","","","","","","","No.11",42.02],["",240,41.8,40.74,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170868.3590316999,54091.42192926399,"","","","","","","","","","","","","","","","","No.12",41.8],["P",260,41.73,40.529999999999994,200,"M2-SD-07","","","OP02",0.3,"","","","","","","","","","","","","","",170866.47642506968,54111.33312692134,"","","","","","","","","","","","","","","","","No.13",41.73,"M2-SD-07"],["",280,41.46,40.29,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170866.59163063366,54131.33279511368,"","","","","","","","","","","","","","","","","No.14",41.46],["",300,41.25,40.06,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170866.7068361976,54151.33246330288,"","","","","","","","","","","","","","","","","No.15",41.01],["P",310,41.14,39.94,200,"M2-SD-08","","","OP02",0.3,"","","","","","","","","","","","","","",170866.7644389796,54161.33229739432,"","","","","","","","","","","","","","","","","No.15+10.0",41.14,"M2-SD-08"],["",320,40.96,39.76,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170866.51682048687,54171.3292311815,"","","","","","","","","","","","","","","","","No.16",40.96],["",340,40.65,39.39,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170866.02158350157,54191.32309874954,"","","","","","","","","","","","","","","","","No.17",40.65],["P",350,40.41,39.209999999999994,200,"M2-SD-09","","","OP02",0.3,"","","","","","","","","","","","","","",170865.7739649736,54201.32003395905,"","","","","","","","","","","","","","","","","No.17+10.0",40.41,"M2-SD-09"],["",360,40.2,38.95,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170861.13663686323,54210.179783361724,"","","","","","","","","","","","","","","","","No.18",40.2],["P",379,39.56,38.46,200,"M2-SD-10","","","OP02",0.3,"","","","","","","","","","","","","","",170852.32569912466,54227.0133346025,"","","","","","","","","","","","","","","","","No.18+19.0",39.56,"M2-SD-10"],["",380,39.55,38.44,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170851.35131098083,54226.78858726311,"","","","","","","","","","","","","","","","","No.19",39.55],["",400,39.22,38.12,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170831.8629987346,54222.29351376049,"","","","","","","","","","","","","","","","","No.20",39.22],["P",409,39.17,37.97,200,"M2-SD-11","","","OP02",0.3,"","","","","","","","","","","","","","",170823.09323075533,54220.27072434857,"","","","","","","","","","","","","","","","","No.20+9.0",39.17,"M2-SD-11"],["",420,39.03,37.84,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170812.26811970316,54218.31717615717,"","","","","","","","","","","","","","","","","No.21",39.03],["",440,38.8,37.61,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170792.58604916913,54214.765261252134,"","","","","","","","","","","","","","","","","No.22",38.8],["P",449,38.71,37.51,200,"M2-SD-12","","","OP02",0.3,"","","","","","","","","","","","","","",170783.72908968732,54213.16689453852,"","","","","","","","","","","","","","","","","No.22+9.0",38.71,"M2-SD-12"],["",460,38.55,37.36,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170772.81425638913,54211.80095387277,"","","","","","","","","","","","","","","","","No.23",38.55],["",480,38.3,37.09,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170752.96905408075,54209.317419025065,"","","","","","","","","","","","","","","","","No.24",38.3],["P",489,38.17,36.97,200,"M2-SD-13","","","OP02",0.3,"","","","","","","","","","","","","","",170744.0386850705,54208.1998248431,"","","","","","","","","","","","","","","","","No.24+9.0",38.17,"M2-SD-13"],["",500,38.02,36.77,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170733.06464648622,54207.444936123706,"","","","","","","","","","","","","","","","","No.25",38.02],["P",519,37.62,36.419999999999995,200,"M2-SD-14","","","OP02",0.3,"","","","","","","","","","","","","","",170714.1094122314,54206.14103215048,"","","","","","","","","","","","","","","","","No.25+19.0",37.62,"M2-SD-14"],["",520,37.6,36.4,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170713.10962318716,54206.16014987858,"","","","","","","","","","","","","","","","","No.26",37.6],["",540,37.19,36.02,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170693.11327860257,54206.54251521955,"","","","","","","","","","","","","","","","","No.27",37.19],["",560,36.82,35.63,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170673.11693401798,54206.924880560524,"","","","","","","","","","","","","","","","","No.28",37.08],["P",569,36.66,35.459999999999994,200,"M2-SD-15","","","OP02",0.3,"","","","","","","","","","","","","","",170664.1185507699,54207.096945502904,"","","","","","","","","","","","","","","","","No.28+9.0",36.66,"M2-SD-15"],["",580,36.42,35.31,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170653.12020963663,54206.90754609907,"","","","","","","","","","","","","","","","","No.29",36.42],["",600,36.17,35.04,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170633.12317451078,54206.56318266413,"","","","","","","","","","","","","","","","","No.30",36.17],["",620,35.89,34.77,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170613.12613938493,54206.2188192292,"","","","","","","","","","","","","","","","","No.31",35.89],["",640,35.64,34.5,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170593.12910425907,54205.87445579426,"","","","","","","","","","","","","","","","","No.32",35.64],["P",644,35.55,34.449999999999996,200,"M2-SD-16","","","OP02",0.3,"","","","","","","","","","","","","","",170589.12967042602,54205.805582645626,"","","","","","","","","","","","","","","","","No.32+4.0",35.55,"M2-SD-16"],["",660,35.38,34.29,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170573.13591631976,54205.359520307014,"","","","","","","","","","","","","","","","","No.33",35.38],["",680,35.21,34.1,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170553.14369018516,54204.80194144939,"","","","","","","","","","","","","","","","","No.34",35.21],["",700,34.92,33.9,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170533.15146405055,54204.244362591766,"","","","","","","","","","","","","","","","","No.35",34.92],["P",719,34.82,33.72,200,"M2-SD-17","","","OP02",0.3,"","","","","","","","","","","","","","",170514.15882242122,54203.71466192954,"","","","","","","","","","","","","","","","","No.35+19.0",34.82,"M2-SD-17"],["",720,34.85,33.72,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170513.15914672666,54203.690271711974,"","","","","","","","","","","","","","","","","No.36",34.85],["",740,34.69,33.63,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170493.16509675788,54203.20245428132,"","","","","","","","","","","","","","","","","No.37",34.69],["",760,34.55,33.54,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170473.1710467891,54202.71463685067,"","","","","","","","","","","","","","","","","No.38",34.55],["",780,34.51,33.45,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170453.17699682032,54202.22681942002,"","","","","","","","","","","","","","","","","No.39",34.66],["P",794,34.49,33.39,200,"M2-SD-18","","","OP02-B",0.3,"","","","","","","","","","","","","","",170439.18113503847,54201.88534656461,"","","","","","","","","","","","","","","","","No.39+14.0",34.49,"M2-SD-18"],["",800,34.27,33.38,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170433.18319833366,54201.72903423045,"","","","","","","","","","","","","","","","","No.40",34.27],["",820,34.25,33.33,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170413.1899866424,54201.20799078823,"","","","","","","","","","","","","","","","","No.41",34.25],["",840,34.14,33.29,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170393.19677495115,54200.68694734601,"","","","","","","","","","","","","","","","","No.42",34.14],["P",844,34.13,33.28,200,"M2-SD-19","","","OP02-B",0.3,"","","","","","","","","","","","","","",170389.19810581152,54200.58273795909,"","","","","","","","","","","","","","","","","No.42+4.0",34.13,"M2-SD-19"],["P",850,33.82,33.23,200,"M2-SD-20","","","OP02",0.3,"","","","","","","","","","","","","","",170385.06744604086,54196.23101849382,"","","","","","","","","","","","","","","","","No.42+10.0",33.82,"M2-SD-20"],["",860,29.09,33.18,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170375.07085138033,54195.970496757975,"","","","","","","","","","","","","","","","","No.43",29.09],["",880,28.9,33.07,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170355.077639705,54195.44945270372,"","","","","","","","","","","","","","","","","No.44",28.9],["P",892,33.66,33.01,200,"M2-SD-21","","","OP02-B",0.3,"","","","","","","","","","","","","","",170343.08170152153,54195.13682597985,"","","","","","","","","","","","","","","","","No.44+12.0",32.85,"M2-SD-21"],["P",897,33.83,32.92999999999999,200,"M2-SD-22","","","OP02-B",0.3,"","","","","","","","","","","","","","",170339.45524785004,54198.5790621834,"","","","","","","","","","","","","","","","","No.44+17.0",33.83,"M2-SD-22"],["",900,33.8,32.91,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170336.45629290296,54198.50090627381,"","","","","","","","","","","","","","","","","No.45",33.8],["",920,33.71,32.78,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170316.46308122767,54197.97986221954,"","","","","","","","","","","","","","","","","No.46",33.71],["",940,33.66,32.64,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170296.46986955235,54197.458818165265,"","","","","","","","","","","","","","","","","No.47",33.66],["",960,33.54,32.51,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170276.47665787707,54196.93777411099,"","","","","","","","","","","","","","","","","No.48",33.54],["P",972,33.43,32.43,200,"M2-SD-23","","","OP02",0.3,"","","","","","","","","","","","","","",170264.48070406646,54196.62514697985,"","","","","","","","","","","","","","","","","No.48+12.0",33.43,"M2-SD-23"],["",980,33.37,32.41,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170256.48344620175,54196.41673005672,"","","","","","","","","","","","","","","","","No.49",33.37],["",1000,33.3,32.36,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170236.49023452646,54195.89568600245,"","","","","","","","","","","","","","","","","No.50",33.3],["",1020,33.2,32.31,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170216.49702285114,54195.374641948176,"","","","","","","","","","","","","","","","","No.51",32.82],["",1040,33.09,32.27,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170196.50381117585,54194.85359789391,"","","","","","","","","","","","","","","","","No.52",33.09],["P",1047,33,32.25,200,"M2-SD-24","","","OP02-B",0.3,"","","","","","","","","","","","","","",170189.50616028527,54194.67123177637,"","","","","","","","","","","","","","","","","No.52+7.0",33,"M2-SD-24"],["",1060,32.92,32.11,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170176.55823103577,54193.50915131236,"","","","","","","","","","","","","","","","","No.53",32.45],["",1080,32.8,31.89,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170156.6382987966,54191.7213315264,"","","","","","","","","","","","","","","","","No.54",32.79],["",1100,32.67,31.68,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170136.71836655744,54189.93351174044,"","","","","","","","","","","","","","","","","No.55",32.42],["",1120,32.55,31.46,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170116.79843431828,54188.14569195448,"","","","","","","","","","","","","","","","","No.56",32.55],["P",1122,32.54,31.44,200,"M2-SD-25","","","OP02",0.3,"","","","","","","","","","","","","","",170114.80641578333,54187.96690770421,"","","","","","","","","","","","","","","","","No.56+2.0",32.54,"M2-SD-25"],["",1140,32.45,31.37,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170096.81247300154,54187.50095888111,"","","","","","","","","","","","","","","","","No.57",31.98],["",1160,32.34,31.29,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170076.819175017,54186.98323723562,"","","","","","","","","","","","","","","","","No.58",89.96],["",1180,32.24,31.21,200,"","","","OP02",0.3,"","","","","","","","","","","","","","",170056.82587703248,54186.46551559013,"","","","","","","","","","","","","","","","","No.59",32.24],["P",1197,32.14,31.14,200,"M2-SD-26","","","OP02-B",0.3,"","","","","","","","","","","","","","",170039.83154833651,54186.0254515335,"","","","","","","","","","","","","","","","","No.59+17.0",32.14,"M2-SD-26"],["",1200,32.14,31.14,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170036.84134138207,54186.267339657046,"","","","","","","","","","","","","","","","","No.60",32.14],["",1220,32.07,31.11,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",170016.90645945314,54187.8799408102,"","","","","","","","","","","","","","","","","No.61",32.07],["P",1233,31.99,31.09,200,"M2-SD-27","","","OP02-B",0.3,"","","","","","","","","","","","","","",170003.9487585152,54188.92813379921,"","","","","","","","","","","","","","","","","No.61+13.0",31.99,"M2-SD-27"],["",1240,31.93,31.08,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",169996.9516363528,54188.728402475776,"","","","","","","","","","","","","","","","","No.62",31.93],["",1260,31.83,31.07,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",169976.9597794224,54188.1577392874,"","","","","","","","","","","","","","","","","No.63",31.83],["",1280,31.72,31.05,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",169956.967922492,54187.58707609903,"","","","","","","","","","","","","","","","","No.64",31.72],["P",1285,31.7,31.05,200,"M2-SD-28","","","OP02-B",0.3,"","","","","","","","","","","","","","",169951.96993054982,54187.44440951097,"","","","","","","","","","","","","","","","","No.64+5.0",31.7,"M2-SD-28"],["",1300,31.6,31.01,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",169941.9205714772,54176.30845195876,"","","","","","","","","","","","","","","","","No.65",31.51],["P",1305,31.65,31,200,"M2-SD-29","","","OP02-B",0.3,"","","","","","","","","","","","","","",169938.57077108885,54172.59645056008,"","","","","","","","","","","","","","","","","No.65+5.0",31.65,"M2-SD-29"],["",1320,31.94,30.96,200,"","","","OP02-B",0.3,"","","","","","","","","","","","","","",169936.96611567892,54157.68253994151,"","","","","","","","","","","","","","","","","No.66",31.94],["P",1321,31.96,30.96,200,"M2-SD-30","","","OP02",0.3,"","","","","","","","","","","","","","",169936.85913965994,54156.68828860544,"","","","","","","","","","","","","","","","","No.66+1.0",31.96,"M2-SD-30"],["P",1335,32.46,30.91,200,"M2-SD-31","","","OP02",0.3,"","","","","","","","","","","","","","",169922.863551257,54157.039721751404,"","","","","","","","","","","","","","","","","No.66+15.0",32.27,"M2-SD-31"],[],["","측점","INV","SIZE","TEXT","BoxT1","BoxT2","BoxT3","여유거리","중심거리","이격거리","","측점","TXT"],["","0+2.3",45.46,65,"상수","","","","","","","","","","","","","","","","","","","",46.5316,46.53,45.46],["","17+6.0",39.51,150,"상수","","","","","","","","","","","","","","","","","","","",40.506,40.51,39.51],["","18+1.650",37.1,1000,"우수"],["","18+9.670",38.2,260,"동복발전"],["","18+9.670",37.84,260,"동복발전"],["","18+9.890",38.54,130,"동복발전"],["","18+10.000",38.2,260,"동복발전"],["","18+10.000",37.84,260,"동복발전"],["","18+10.100",38.54,130,"동복발전"],["","18+10.300",38.2,260,"동복발전"],["","18+10.300",37.84,260,"동복발전"],["","18+10.400",39,50,"통신","","","","","","","","","","","","","","","","","","","",39.85],["","18+10.600",39,50,"통신"],["","27+17.5",36.02,50,"통신","","","","","","","","","","","","","","","","","","",35,1.87,36.87,36.02],["","52+12.7",31.14,1000,"기존관"],["","54+12.6",30.23,1200,"기존관"],["","58+6.4",31.48,50,"통신","","","","","","","","","","","","","","","","","","","",32.31],["","58+6.6",31.48,50,"통신"],["","65+8.0",30.43,250,"상수","","","","","","","","","","","","","","","","","","","",31.68,31.68,30.43],["","66+1.8",30.84,100,"상수","","","","","","","","","","","","","","","","","","","",31.98858,31.99,30.889999999999997],["","66+9.5",31.41,50,"통신","","","","","","","","","","","","","","","","","","",30,2.26,32.26,31.409999999999997],["","66+9.5",29.22,"1.34*1.34","한국전력"],["","66+10.6",31.15,150,"상수","","","","","","","","","","","","","","","","","","","",32.302,32.3,31.15]]}]</script>
