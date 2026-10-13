@@ -180,12 +180,12 @@ button,.tab{touch-action:manipulation}
       <button id="bPaste">시트 붙여넣기</button>
       <button id="bCopyProf" title="현재 노선의 종단파일 시트 (PipeTools 형식)">종단파일 복사</button>
       <button id="bCopyIn" title="PipeTools 수리계산 시트 A~AG">수리시트 복사</button>
-      <button id="bCopyOut">계산결과 복사</button>
+      <button id="bCopyOut" title="PipeTools 결과(rpt) 시트와 같은 열 구성">계산결과 복사 (rpt 양식)</button>
     </div>
   </div>
 
   <div class="dlg" id="dlg" hidden>
-    <div class="bar"><strong>시트 붙여넣기</strong><span class="sub">PipeTools 엑셀에서 <b>종단파일</b> 시트나 <b>수리계산</b> 시트(PipeTools(노선명))를 A1부터 통째로 복사해 붙여넣으세요. 제목 행으로 어느 시트인지 알아봅니다. 종단파일을 붙이면 지금 관로와 맨홀 좌표가 같은 곳의 유량 자료를 이어받습니다.</span></div>
+    <div class="bar"><strong>시트 붙여넣기</strong><span class="sub">PipeTools 엑셀에서 <b>종단파일</b> 시트나 <b>수리계산</b> 시트(PipeTools(노선명))를 A1부터 통째로 복사해 붙여넣으세요. 제목 행으로 어느 시트인지 알아봅니다. <b>결과(rpt) 시트</b>를 붙이면 지금 계산과 비교하는 열이 붙습니다. 종단파일을 붙이면 지금 관로와 맨홀 좌표가 같은 곳의 유량 자료를 이어받습니다.</span></div>
     <textarea id="pasteBox" spellcheck="false" placeholder="Ctrl+A로 시트 전체 선택 → Ctrl+C → 여기에 Ctrl+V"></textarea>
     <div class="err" id="pasteErr"></div>
     <div class="btns"><button id="bApply" class="on">적용</button><button id="bClose">닫기</button></div>
@@ -475,13 +475,13 @@ function compute(pipes,crit,rain=null){
   // 상류 → 하류 누가: 오수(인구·오수량) + 우수(면적·C×A·유달시간)
   const acc=p=>{
     if(memo.has(p.id))return memo.get(p.id);
-    if(stack.has(p.id))return{pop:0,Q:0,Qs:0,A:0,CA:0,R:0,Qr:0,loop:true};   // 관망에 순환이 있으면 끊음
+    if(stack.has(p.id))return{pop:0,Q:0,Qs:0,A:0,CA:0,R:0,Qr:0,ExtC:0,loop:true};   // 관망에 순환이 있으면 끊음
     stack.add(p.id);
     const popL=(+p.area||0)*(+p.dens||0);
     const QL=((+p.won||0)*(+p.pf||1)+(+p.gwon||0))*popL/86400000+(+p.ext||0);
-    let pop=popL,Qs=QL,A=+p.area||0,CA=(+p.C||0)*(+p.area||0),Ru=0,hasUp=false;
-    (byDn.get(p.up)||[]).forEach(q=>{const a=acc(q);pop+=a.pop;Qs+=a.Qs;A+=a.A;CA+=a.CA;Ru=Math.max(Ru,a.R||0);hasUp=true;});
-    const r={popL,pop,QL,Qs,Q:Qs,A,CA,Cavg:A>0?CA/A:0};
+    const extL=+p.ext||0;let pop=popL,Qs=QL,A=+p.area||0,CA=(+p.C||0)*(+p.area||0),Ru=0,hasUp=false,ExtC=extL;
+    (byDn.get(p.up)||[]).forEach(q=>{const a=acc(q);pop+=a.pop;Qs+=a.Qs;A+=a.A;CA+=a.CA;Ru=Math.max(Ru,a.R||0);ExtC+=a.ExtC||0;hasUp=true;});
+    const r={popL,pop,QL,Qs,Q:Qs,A,CA,Cavg:A>0?CA/A:0,extL,ExtC,sewL:QL-extL,rainL:0};
     if(storm){
       // 유달시간 반복: R = 유입시작시간 + L/(60V), I = f(R), Q = ΣCA × I / 360, V는 Q로 다시 계산 (최대 30회)
       const cls=rainClass(rain,p),base=cls==='main'?(rain.t1??5):(rain.t2??10);
@@ -493,7 +493,7 @@ function compute(pipes,crit,rain=null){
         if(Math.abs(Vn-V)<1e-6){V=Vn;break;}V=Vn;
       }
       R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R));Qr=CA*I/360;
-      Object.assign(r,{cls,tc,R,I,Qr,Q:Qs+Qr,iter:it});
+      Object.assign(r,{cls,tc,R,I,Qr,Q:Qs+Qr,iter:it,rainL:(+p.C||0)*(+p.area||0)*I/360});
     }
     stack.delete(p.id);memo.set(p.id,r);return r;
   };
@@ -685,7 +685,7 @@ PT.parseProfile=rows=>{
     const z=PT.size(r[3]);
     obs.push({row:k,ch,inv:PT.num(r[2]),...z,size:String(r[3]??'').trim(),name:String(r[4]??'').trim()});
   }
-  return{rows:rows.map(r=>(r||[]).slice()),h,C,opt,chainInt,dp,line:String(opt['라인명']??'').trim()||'노선',ptype:String(opt['관종']??'').trim(),stations,obs};
+  return{rows:rows.map(r=>(r||[]).slice()),h,C,opt,chainInt,dp,obsHead,line:String(opt['라인명']??'').trim()||'노선',ptype:String(opt['관종']??'').trim(),stations,obs};
 };
 // 종단파일 → 관로: 맨홀(맨홀 열이 채워진 측점) 사이마다 관로 1개
 // 맨홀 묶음: 같은 누가거리·같은 맨홀명 연속 두 행 = 단차 맨홀 (1행 유입관저, 2행 유출관저)
@@ -769,7 +769,18 @@ PT.exportProfile=(prof,route)=>{
         const code=(p.st||[]).find(t=>Math.abs(t.c-c)<1e-6)?.code;if(code!==undefined&&code!==s.code)r[C.code]=code;}}
     out.push(r);
   });
+  if(!(prof.obsHead>=0))PT.obsTable(route,prof.chainInt||20).forEach(r=>out.push(r));   // 원본에 지장물 표가 없으면 만들어 붙임
   return out;
+};
+// 종단파일 하단 지장물 표: 빈 행 + 제목 행 + (측점 'N+거리', INV, SIZE, TEXT) 행. 표가 없으면 PipeTools가 종단파일을 읽지 못한다.
+PT.OBS_HEAD=['','측점','INV','SIZE','TEXT','BoxT1','BoxT2','BoxT3','여유거리','중심거리','이격거리','','측점','TXT'];
+PT.obsTable=(route,chainInt)=>{
+  const rows=[[],PT.OBS_HEAD.slice()];let ch0=0;
+  route.forEach(p=>{(p.obs||[]).forEach(o=>{
+    const ch=ch0+Math.max(0,Math.min(p.L,o.off)),n=Math.floor(ch/chainInt+1e-9),rem=+(ch-n*chainInt).toFixed(3);
+    rows.push(['',`${n}+${rem}`,o.inv,o.size||(o.box?`${o.w}*${o.h}`:Math.round(o.w*1000)),o.name]);});
+    ch0+=p.L;});
+  return rows;
 };
 // 종단파일이 없는 노선은 새로 만든다 (맨홀 + chain 간격 측점)
 PT.newProfile=(route,line,chainInt=20)=>{
@@ -794,7 +805,7 @@ PT.newProfile=(route,line,chainInt=20)=>{
     });
     ch0+=p.L;
   });
-  return rows;
+  return rows.concat(PT.obsTable(route,chainInt));
 };
 // 수리계산 시트 내보내기 (A~AG). 읽어온 행이 있으면 바뀐 값만 덮어쓴다.
 PT.exportHyd=(pipes,head)=>{
@@ -1340,6 +1351,58 @@ $('#rainForm').addEventListener('change',e=>{
   render();toast('강우 계수를 바꿨습니다 · 수리시트 복사 시 반영');
 });
 
+/* ---------- 계산결과: PipeTools rpt 시트와 같은 양식 ---------- */
+const COLN=n=>{let s='';n++;while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26);}return s;};
+function rptRows(){
+  const list=[...routes.values()].flat(),storm=!!(doc.rain&&doc.rain.type1>1),gv=!!crit.gvf,K=storm?1:86400,
+    q5=v=>+(+v*K).toFixed(5),W=44,blank=()=>new Array(W).fill('');
+  const mk=o=>{const r=blank();Object.entries(o).forEach(([c,v])=>{r[c.split(/(?=\d)/)[0].split('').reduce((a,ch)=>a*26+ch.charCodeAt(0)-64,0)-1]=v;});return r;};
+  const flowU=storm?'(㎥/sec)':'(㎥/d)';
+  const ups=new Set(pipes.map(p=>p.up)),outlets=list.filter(p=>!ups.has(p.dn));
+  const outQ=outlets.reduce((a,p)=>a+(res.get(p.id)?.Q||0),0);
+  const name=(doc.hydName||`PipeTools(${list[0]?.line||''})`);
+  const h1=blank();h1[0]=`▶ ${name} 관망계산summary`;h1[38]='OUT Q=';h1[39]=+(outQ*K).toFixed(5);h1[40]=storm?'CMS':'CMD';
+  const h2=mk({A:'관로',B:'대상',C:'상류',D:'하류',E:'관로',F:'관제원',I:'상류',J:'하류',K:'상류',L:'하류',M:'관로',N:'각선',O:'누가',P:storm?'유출':'인구',Q:storm?'평균':'오수',R:storm?'유달':'각선',S:storm?'강우':'누가',T:'만관',U:'만관',V:'최대',W:'최대',X:gv?'상류':'허용',Y:gv?'하류':'허용',Z:'유입유량',AC:'누가유입유량',AF:'실유량',AG:'실유속',AH:'실수심',AI:'유량비',AJ:'수심비',AK:'설계',AL:'설계',AM:'설계',AN:'기타',AO:storm?'월류':'초과',AP:'BACK',AQ:'유입',AR:'도면'});
+  const h3=mk({A:'노선',B:'관로',C:'맨홀',D:'맨홀',E:'연장',F:'폭',G:'높이',H:'련',I:'지반고',J:'지반고',K:'관저고',L:'관저고',M:'경사',N:'면적',O:'면적',P:storm?'계수':'밀도',Q:storm?'유출계수':'원단위',R:storm?'시간':'인구',S:storm?'강도':'인구',T:'유량',U:'유속',V:'유량',W:'유속',X:gv?'수위':'유량',Y:gv?'수위':'유속',Z:'오수량',AA:'우수량',AB:'직접유량',AC:'오수량',AD:'우수량',AE:'직접유량',AK:'여유율',AL:'유속',AM:'토피',AN:'사항',AO:'유량',AP:'DROP',AQ:'관로',AR:'레이어'});
+  const h4=mk({A:'번호',B:'번호',C:'번호',D:'번호',E:'(m)',F:'(m)',G:'(mm,m)',H:'(ea)',I:'(El.m)',J:'(El.m)',K:'(El.m)',L:'(El.m)',M:'(‰)',N:'(ha)',O:'(ha)',P:storm?'(C)':'(Density)',Q:storm?'(AvgC)':'(L)',R:storm?'(min)':'(인)',S:storm?'(mm/hr)':'(인)',T:flowU,U:'(m/s)',V:flowU,W:'(m/s)',X:gv?'(Hgl)':flowU,Y:gv?'(Hgl)':'(m/s)',Z:flowU,AA:flowU,AB:flowU,AC:flowU,AD:flowU,AE:flowU,AF:flowU,AG:'(m/s)',AH:'(m)',AI:'(%)',AJ:'(%)',AK:'검토',AL:'검토',AM:'검토',AN:'검토',AO:'검토',AP:'검토',AQ:'검토',AR:'상태'});
+  const body=list.map(p=>{
+    const r=res.get(p.id),g=r.g,box=isBox(p),row=blank(),nb=Math.max(1,+p.nb||1);
+    const outfall=!ups.has(p.dn),incoming=pipes.filter(q=>q.dn===p.up&&q.line!==p.line).map(q=>q.id).join(',');
+    // 최대유량·유속: 원형은 수심비 0.938 지점 (만관의 1.0757배 / 1.1041배, PipeTools 7.0), 암거는 만관과 같음
+    const qm=box||r.pump?r.Qfull:r.Qfull*1.0757,vm=box||r.pump?r.Vfull:r.Vfull*1.1041;
+    let an='';
+    if(r.pump)an=r.Q>0?'GOOD':'Q-ZERO';
+    else if(/Adverse/.test(r.rem[0]))an='Adverse Slope';else if(/ZERO_SLOPE/.test(r.rem[0]))an='ZERO_SLOPE';
+    else if(!(r.Q>0))an='Q-ZERO';
+    // PipeTools 기타사항: 유속 0.3 미만이면 경사 10‰ 이상은 SLOPE1.0%, 미만은 LESS0.3, 0.3~0.6은 MAINT0.3
+    else if(r.vLabel&&(/↓/.test(r.vLabel)||(r.vLabel==='구배10.0%이상'&&r.V<crit.vlow)))an=r.S>=10?'SLOPE1.0%':'LESS'+crit.vlow;
+    else if(r.vLabel==='유지관리')an='MAINT'+crit.vlow;
+    else if(r.vLabel&&/↑/.test(r.vLabel))an='';
+    else an=(storm&&!gv)?'':'GOOD';
+    if(g&&g.label!=='GOOD')an=g.label;
+    if(outfall)an=('방류구 '+an).trim();
+    const set=(c,v)=>{row[c]=v;};
+    set(0,(p.raw&&String(p.raw[41]??'').trim())||p.line);set(1,p.id);set(2,p.up);set(3,p.dn);set(4,p.L);
+    if(box){set(5,+p.W);set(6,+p.D);}else set(6,+p.D);
+    set(7,nb);set(8,p.ghUp);set(9,p.ghDn);set(10,p.invUp);set(11,p.invDn);set(12,+r.S.toFixed(2));
+    set(13,+p.area||0);set(14,+(+r.A||0).toFixed(2));
+    if(storm){set(15,+p.C||0);set(16,+(r.Cavg||0).toFixed(3));set(17,+(r.R||0).toFixed(3));set(18,+(r.I||0).toFixed(3));}
+    else{set(15,+p.dens||0);set(16,+p.won||0);set(17,Math.round(r.popL));set(18,Math.round(r.pop));}
+    const pf=r.pump?0:1;   // 압송관은 만관·최대·허용 유량·유속을 0으로 표시 (PipeTools와 같음)
+    set(19,q5(r.Qfull*pf));set(20,+(r.Vfull*pf).toFixed(3));set(21,q5(qm*pf));set(22,+(vm*pf).toFixed(3));
+    if(g){set(23,+g.Hup.toFixed(3));set(24,+g.Hdn.toFixed(3));}else{set(23,q5(r.Qfull*pf));set(24,+(r.Vfull*pf).toFixed(3));}
+    set(25,q5(r.sewL));set(26,q5(r.rainL));set(27,q5(r.extL));
+    set(28,q5(r.Qs-r.ExtC));set(29,q5(r.Qr||0));set(30,q5(r.ExtC));set(31,+(r.Q*K).toFixed(5));
+    set(32,+r.V.toFixed(3));set(33,r.pump?'PUMP':+r.h.toFixed(4));
+    set(34,isFinite(r.qr)?+(r.qr*100).toFixed(3):0);set(35,r.pump?'':+(r.hD*100).toFixed(2));
+    set(36,r.marginOK||r.pump?'GOOD':'N.G');set(37,r.vLabel||'');set(38,(r.coverNG||r.coverProt)?'NG':'GOOD');
+    set(39,an);set(40,r.pump?'펌프':'');set(42,incoming);set(43,p.layer==='1'?'기존':p.layer==='2'?'개량':'신설');
+    return row;
+  });
+  return [h1,h2,h3,h4,...body];
+}
+$('#bCopyOut').onclick=()=>copyText(PT.toTSV(rptRows()),'계산결과 (PipeTools rpt 양식)');
+
 /* ---------- PipeTools 결과 비교 ---------- */
 const cmpOn=()=>ui.cmp&&doc.rpt.size>0;
 // 유속 판정 구분: PipeTools GOOD / 유지관리 / NG(V)
@@ -1419,16 +1482,12 @@ $('#bCopyProf').onclick=()=>{
   const rows=prof?PT.exportProfile(prof,route):PT.newProfile(route,ui.route);
   copyText(PT.toTSV(rows),`${ui.route} 종단파일${prof?'':' (새로 만듦)'}`);
 };
-$('#bCopyOut').onclick=()=>{
-  const hd=['노선명','관로번호','상류','하류','연장','관경','경사(‰)','상류관저','하류관저','상류지반','하류지반','누가인구','Q(m3/s)','Qfull(m3/s)','Qallow(m3/s)','V(m/s)','h/D','유량비(%)','토피min','판정','토피·지장물'];
-  const rows=[...routes.values()].flat().map(p=>{const r=res.get(p.id);return[p.line,p.id,p.up,p.dn,p.L,p.D,r.S.toFixed(2),f2(p.invUp),f2(p.invDn),f2(p.ghUp),f2(p.ghDn),Math.round(r.pop),f4(r.Q),f4(r.Qfull),f4(r.Qallow),r.V.toFixed(3),r.hD.toFixed(3),isFinite(r.qr)?(r.qr*100).toFixed(2):'',f2(r.cmin),r.rem.join(' '),r.flags.join(' ')].join('\t');});
-  copyText([hd.join('\t'),...rows].join('\n'),'계산결과');
-};
 $('#bPaste').onclick=()=>{$('#dlg').hidden=false;$('#pasteErr').textContent='';$('#pasteBox').focus();};
 $('#bClose').onclick=()=>{$('#dlg').hidden=true;};
 $('#bApply').onclick=()=>{
   const text=$('#pasteBox').value,rows=PT.tsvRows(text),kind=PT.kind(rows);
   let r;
+  if(kind==='rpt'){doc.rpt=PT.parseRpt(rows);ui.cmp=true;ui.qd=!(doc.rain&&doc.rain.type1>1);render();$('#dlg').hidden=true;toast(`PipeTools 결과 ${doc.rpt.size}개 관로를 불러와 비교 열을 붙였습니다`);return;}
   if(kind==='profile')r=loadSheets([{name:'붙여넣기',rows}],{keepHyd:true});
   else if(kind==='hyd')r=loadSheets([{name:'붙여넣기',rows}],{keepProfiles:true});
   else{const t=parseTSV(text);r=t.errs.length?{errs:t.errs}:applyLoaded(t.pipes,[],null,'붙여넣기');}
