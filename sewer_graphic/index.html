@@ -262,6 +262,9 @@ button,.tab{touch-action:manipulation}
           <label for="cVmax">최대유속 (m/s)</label><input id="cVmax" type="number" step="0.1" value="3.0">
           <label for="cVlow">유지관리 하한 유속 (m/s)</label><input id="cVlow" type="number" step="0.05" value="0.3">
           <label for="cCover">최소토피 (m)</label><input id="cCover" type="number" step="0.1" value="1.0">
+          <label for="cCoverB">암거 최소토피 (m)</label><input id="cCoverB" type="number" step="0.1" value="1.0">
+          <label for="cAllowC">허용 수심비 · 원형</label><input id="cAllowC" type="number" step="0.05" value="1.0">
+          <label for="cAllowB">허용 수심비 · 암거</label><input id="cAllowB" type="number" step="0.05" value="0.9">
           <label for="cCovMode">토피 검토 위치</label><select id="cCovMode"><option value="pt">상류단</option><option value="all">전 측점</option></select>
           <label for="cClear">지장물 최소이격 (m)</label><input id="cClear" type="number" step="0.05" value="0.3">
         </div>
@@ -468,6 +471,14 @@ function gvfNetwork(pipes,out,crit){
   pipes.forEach(p=>solve(p,null));   // 순환 등으로 남은 관로
 }
 
+// 허용 수심비에서의 1련 유량·유속 (Qfull·Vfull은 만관)
+function allowAt(p,S,n,u){
+  const ar=isBox(p)?(crit.allowBox??0.9):(crit.allowCirc??1.0);
+  if(!(S>0))return{Q:0,V:0};if(ar>=0.9999)return{Q:u.Qfull,V:u.Vfull};
+  if(isBox(p)){const W=+p.W,h=ar*(+p.D),Q=rectQ(W,h,S,n);return{Q,V:Q/(W*h)};}
+  const D=(+p.D)/1000,th=2*Math.acos(1-2*ar),c=circ(D,th),Q=flowAt(D,th,S,n);return{Q,V:Q/c.A};
+}
+
 function compute(pipes,crit,rain=null){
   const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
   const storm=rain&&+rain.type1>1;
@@ -508,7 +519,8 @@ function compute(pipes,crit,rain=null){
     const adverse=!pump&&S<=0;
     const u=hydOf(p,a.Q);
     // PipeTools 방식: 허용유량 = 만관유량. 여유율은 따로 검토: Q×(1+여유율) ≤ Qfull
-    const Qfull=u.Qfull*nb,Qallow=Qfull,qr=Qfull>0?a.Q/Qfull:Infinity,use=Qfull>0?a.Q*(1+margin)/Qfull:Infinity;
+    // PipeTools 7.0: 허용유량 = 허용 수심비에서의 유량 (원형 1.0 = 만관, 암거 0.9). 여유율은 따로 검토: Q×(1+여유율) ≤ 허용유량
+    const Qfull=u.Qfull*nb,al=allowAt(p,S,n,u),Qallow=pump||S<=0?0:al.Q*nb,Vallow=pump||S<=0?0:al.V,qr=Qfull>0?a.Q/Qfull:Infinity,use=Qallow>0?a.Q*(1+margin)/Qallow:Infinity;
     const covUp=p.ghUp-p.invUp-D,covDn=p.ghDn-p.invDn-D;
     const rem=[];let st=0;
     const bump=s=>{if(s>st)st=s;};
@@ -548,10 +560,11 @@ function compute(pipes,crit,rain=null){
     // 토피 검토 위치: 'pt' = 관로 상류단만 (PipeTools rpt와 같음, 맨홀마다 한 번), 'all' = 상·하류단 + 모든 측점
     const cminAll=cmin;
     if(crit.coverMode!=='all'){cmin=covUp;cminU=isProt(p.code)?Infinity:covUp;}
-    const coverNG=cminU<crit.cover-0.0005,coverProt=!coverNG&&cmin<crit.cover-0.0005;
+    const cmin0=isBox(p)?(crit.coverBox??crit.cover):crit.cover;
+    const coverNG=cminU<cmin0-0.0005,coverProt=!coverNG&&cmin<cmin0-0.0005;
     if(coverNG)flags.unshift('COVER'+cminU.toFixed(2));
     else if(coverProt)flags.unshift('보호공'+cmin.toFixed(2));
-    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU,cminAll,qr,vLabel,marginOK,pump,storm});
+    out.set(p.id,{...a,S:S*1000,D,nb,n,margin,h:u.h,hD:u.h/D,V:u.V,Vfull:u.Vfull,Qfull,Qallow,Vallow,use,sur:u.sur,covUp,covDn,rem,st,joint:null,cmin,obsHits,flags,coverNG,coverProt,cminU,cminAll,qr,vLabel,marginOK,pump,storm});
   });
   // 맨홀 접합 검토: 유입관 하류관저가 유출관 상류관저보다 낮으면 역류
   const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
@@ -827,7 +840,7 @@ PT.exportHyd=(pipes,head)=>{
 const $=s=>document.querySelector(s);
 const NS='http://www.w3.org/2000/svg';
 const clone=o=>JSON.parse(JSON.stringify(o));
-const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,clear:0.3,coverMode:'pt'};
+const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,coverBox:1.0,clear:0.3,coverMode:'pt',allowCirc:1.0,allowBox:0.9};
 const doc={profiles:new Map(),hydHead:null,file:'',base:new Map(),rpt:new Map(),rain:null};
 // 불러온 시점 값 (변경 추적용)
 const BASE_KEYS=['invUp','invDn','ghUp','ghDn','D','W','code'];
@@ -1225,7 +1238,7 @@ function renderSection(){
       ['우수량 C·I·A/360',`${r.Qr.toFixed(4)} m³/s`]]:[['누가인구',Math.round(r.pop).toLocaleString()+' 인']]),
     ['설계유량 Q',fq(r.Q)+' '+qu()],
     ['만관유량 Qfull',fq(r.Qfull)+' '+qu()],
-    ['허용유량 (=만관)',fq(r.Qallow)+' '+qu()],
+    ['허용유량 (수심비 '+(isBox(P(ui.sel))?crit.allowBox:crit.allowCirc)+')',fq(r.Qallow)+' '+qu()],
     ['유량비 Q/Qfull',isFinite(r.qr)?(r.qr*100).toFixed(2)+' %':'—'],
     ['여유율 검토 ('+Math.round(r.margin*100)+'%)',isFinite(r.use)?`${r.use<=1?'<span class="remark good">GOOD</span>':'<span class="remark bad">NG</span>'} Q×${(1+r.margin).toFixed(2)} = ${(r.use*100).toFixed(0)}% of Qfull`:'—'],
     ['경사',r.S.toFixed(2)+' ‰'],
@@ -1278,7 +1291,7 @@ $('#bDUp').onclick=()=>stepD(1);$('#bDDn').onclick=()=>stepD(-1);
 
 /* ---------- 통수능 ---------- */
 // 여유율 한계 = 1/(1+여유율). 유량비가 한계를 넘으면 불량, 한계의 90% 이상이면 주의
-const capLimit=r=>1/(1+(r.margin||0));
+const capLimit=r=>(r.Qfull>0&&r.Qallow>0?r.Qallow/r.Qfull:1)/(1+(r.margin||0));
 const capSt=r=>r.pump?0:!r.marginOK?2:(isFinite(r.qr)&&r.qr>=capLimit(r)*0.9?1:0);
 function renderCap(){
   const ch=routes.get(ui.route)||[],rs=ch.map(p=>res.get(p.id));
@@ -1362,7 +1375,7 @@ function rptRows(){
   const outQ=outlets.reduce((a,p)=>a+(res.get(p.id)?.Q||0),0);
   const name=(doc.hydName||`PipeTools(${list[0]?.line||''})`);
   const h1=blank();h1[0]=`▶ ${name} 관망계산summary`;h1[38]='OUT Q=';h1[39]=+(outQ*K).toFixed(5);h1[40]=storm?'CMS':'CMD';
-  const h2=mk({A:'관로',B:'대상',C:'상류',D:'하류',E:'관로',F:'관제원',I:'상류',J:'하류',K:'상류',L:'하류',M:'관로',N:'각선',O:'누가',P:storm?'유출':'인구',Q:storm?'평균':'오수',R:storm?'유달':'각선',S:storm?'강우':'누가',T:'만관',U:'만관',V:'최대',W:'최대',X:gv?'상류':'허용',Y:gv?'하류':'허용',Z:'유입유량',AC:'누가유입유량',AF:'실유량',AG:'실유속',AH:'실수심',AI:'유량비',AJ:'수심비',AK:'설계',AL:'설계',AM:'설계',AN:'기타',AO:storm?'월류':'초과',AP:'BACK',AQ:'유입',AR:'도면'});
+  const h2=mk({A:'관로',B:'대상',C:'상류',D:'하류',E:'관로',F:'관제원',I:'상류',J:'하류',K:'상류',L:'하류',M:'관로',N:'각선',O:'누가',P:storm?'유출':'인구',Q:storm?'평균':'오수',R:storm?'유달':'각선',S:storm?'강우':'누가',T:'만관',U:'만관',V:'최대',W:'최대',X:gv?'상류':'허용',Y:gv?'하류':'허용',Z:'유입유량',AC:'누가유입유량',AF:'실유량',AG:'실유속',AH:'실수심',AI:'유량비',AJ:'수심비',AK:'설계',AL:'설계',AM:'설계',AN:'기타',AO:'초과',AP:'BACK',AQ:'유입',AR:'도면'});
   const h3=mk({A:'노선',B:'관로',C:'맨홀',D:'맨홀',E:'연장',F:'폭',G:'높이',H:'련',I:'지반고',J:'지반고',K:'관저고',L:'관저고',M:'경사',N:'면적',O:'면적',P:storm?'계수':'밀도',Q:storm?'유출계수':'원단위',R:storm?'시간':'인구',S:storm?'강도':'인구',T:'유량',U:'유속',V:'유량',W:'유속',X:gv?'수위':'유량',Y:gv?'수위':'유속',Z:'오수량',AA:'우수량',AB:'직접유량',AC:'오수량',AD:'우수량',AE:'직접유량',AK:'여유율',AL:'유속',AM:'토피',AN:'사항',AO:'유량',AP:'DROP',AQ:'관로',AR:'레이어'});
   const h4=mk({A:'번호',B:'번호',C:'번호',D:'번호',E:'(m)',F:'(m)',G:'(mm,m)',H:'(ea)',I:'(El.m)',J:'(El.m)',K:'(El.m)',L:'(El.m)',M:'(‰)',N:'(ha)',O:'(ha)',P:storm?'(C)':'(Density)',Q:storm?'(AvgC)':'(L)',R:storm?'(min)':'(인)',S:storm?'(mm/hr)':'(인)',T:flowU,U:'(m/s)',V:flowU,W:'(m/s)',X:gv?'(Hgl)':flowU,Y:gv?'(Hgl)':'(m/s)',Z:flowU,AA:flowU,AB:flowU,AC:flowU,AD:flowU,AE:flowU,AF:flowU,AG:'(m/s)',AH:'(m)',AI:'(%)',AJ:'(%)',AK:'검토',AL:'검토',AM:'검토',AN:'검토',AO:'검토',AP:'검토',AQ:'검토',AR:'상태'});
   const body=list.map(p=>{
@@ -1382,19 +1395,20 @@ function rptRows(){
     if(g&&g.label!=='GOOD')an=g.label;
     if(outfall)an=('방류구 '+an).trim();
     const set=(c,v)=>{row[c]=v;};
-    set(0,(p.raw&&String(p.raw[41]??'').trim())||p.line);set(1,p.id);set(2,p.up);set(3,p.dn);set(4,p.L);
+    set(0,p.line);set(1,p.id);set(2,p.up);set(3,p.dn);set(4,p.L);
     if(box){set(5,+p.W);set(6,+p.D);}else set(6,+p.D);
     set(7,nb);set(8,p.ghUp);set(9,p.ghDn);set(10,p.invUp);set(11,p.invDn);set(12,+r.S.toFixed(2));
     set(13,+p.area||0);set(14,+(+r.A||0).toFixed(2));
-    if(storm){set(15,+p.C||0);set(16,+(r.Cavg||0).toFixed(3));set(17,+(r.R||0).toFixed(3));set(18,+(r.I||0).toFixed(3));}
+    if(storm){set(15,+p.C||0);set(16,+(r.Cavg||0).toFixed(3));set(17,+(r.R||0).toFixed(2));set(18,+(r.I||0).toFixed(2));}
     else{set(15,+p.dens||0);set(16,+p.won||0);set(17,Math.round(r.popL));set(18,Math.round(r.pop));}
-    const pf=r.pump?0:1;   // 압송관은 만관·최대·허용 유량·유속을 0으로 표시 (PipeTools와 같음)
-    set(19,q5(r.Qfull*pf));set(20,+(r.Vfull*pf).toFixed(3));set(21,q5(qm*pf));set(22,+(vm*pf).toFixed(3));
-    if(g){set(23,+g.Hup.toFixed(3));set(24,+g.Hdn.toFixed(3));}else{set(23,q5(r.Qfull*pf));set(24,+(r.Vfull*pf).toFixed(3));}
-    set(25,q5(r.sewL));set(26,q5(r.rainL));set(27,q5(r.extL));
-    set(28,q5(r.Qs-r.ExtC));set(29,q5(r.Qr||0));set(30,q5(r.ExtC));set(31,+(r.Q*K).toFixed(5));
-    set(32,+r.V.toFixed(3));set(33,r.pump?'PUMP':+r.h.toFixed(4));
-    set(34,isFinite(r.qr)?+(r.qr*100).toFixed(3):0);set(35,r.pump?'':+(r.hD*100).toFixed(2));
+    const pf=r.pump?0:1,rd=(v,d)=>+(+v).toFixed(d);   // 압송관은 만관·최대·허용 유량·유속을 0으로 표시 (PipeTools와 같음)
+    set(19,rd(r.Qfull*pf*K,3));set(20,rd(r.Vfull*pf,3));set(21,rd(qm*pf*K,3));set(22,rd(vm*pf,3));
+    if(g){set(23,rd(g.Hup,3));set(24,rd(g.Hdn,3));}else{set(23,rd(r.Qallow*K,3));set(24,rd(r.Vallow,3));}
+    const fd=storm?5:4;   // 표시 자릿수는 PipeTools 7.0 결과 시트에 맞춤
+    set(25,rd(r.sewL*K,fd));set(26,rd(r.rainL*K,fd));set(27,rd(r.extL*K,fd));
+    set(28,rd(r.Qs*K,fd));set(29,rd((r.Qr||0)*K,fd));set(30,rd(r.ExtC*K,fd));set(31,rd(r.Q*K,storm?3:2));
+    set(32,rd(r.V,3));set(33,r.pump?'PUMP':rd(r.h,3));
+    set(34,isFinite(r.qr)?rd(r.qr*100,1):0);set(35,r.pump?'':rd(rd(r.h,3)/r.D*100,1));   // PipeTools 7.0: 수심비는 3자리로 반올림한 수심 기준
     set(36,r.marginOK||r.pump?'GOOD':'N.G');set(37,r.vLabel||'');set(38,(r.coverNG||r.coverProt)?'NG':'GOOD');
     set(39,an);set(40,r.pump?'펌프':'');set(42,incoming);set(43,p.layer==='1'?'기존':p.layer==='2'?'개량':'신설');
     return row;
@@ -1468,7 +1482,7 @@ $('#bSeed').onclick=()=>loadSeed();
 $('#bStorm').onclick=()=>{loadSheets(JSON.parse($('#seedStorm').textContent),{fileName:'우수 예제 (PipeTools 샘플)'});$('#dlg').hidden=true;};
 $('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';doc.rpt=new Map();doc.rain=null;crit.gvf=false;applyModeDefaults();ui.cmp=false;ui.qd=false;edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});snapBase();selectRoute(routesOf(pipes).keys().next().value);};
 $('#cCovMode').addEventListener('change',e=>{crit.coverMode=e.target.value;render();});
-const CRIT_IDS={cVmin:'vmin',cVmax:'vmax',cVlow:'vlow',cCover:'cover',cClear:'clear'};
+const CRIT_IDS={cVmin:'vmin',cVmax:'vmax',cVlow:'vlow',cCover:'cover',cCoverB:'coverBox',cAllowC:'allowCirc',cAllowB:'allowBox',cClear:'clear'};
 Object.keys(CRIT_IDS).forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
   crit[CRIT_IDS[id]]=v;render();}));
 
