@@ -394,7 +394,7 @@ const RAIN_TYPES={1:'General  I = a / (t^b + c)',2:'Talbot  I = a / (t + b)',3:'
 function rainI(rain,cls,t){
   const k=rain.coef[cls]||{},a=k.a??0,b=k.b??0,c=k.c??0,d=k.d??0,T=k.T??10,n=k.n??0;t=Math.max(t,1e-3);
   switch(+rain.type3){
-    case 1:return a/(Math.pow(t,b)+c);
+    case 1:return rain.swap?a/(b+Math.pow(t,c)):a/(Math.pow(t,b)+c);   // swap = PipeTools 7.0 표기 a/(b + t^c)
     case 2:return a/(t+b);
     case 3:return a/Math.pow(t,b);
     case 4:return a/(Math.sqrt(t)+b);
@@ -1346,12 +1346,15 @@ function renderRain(){
   if(has('T1')||has('T2'))f+=`<label>재현기간 T (년)</label>${cell('main','T')}${cell('branch','T')}`;
   f+=`<label>유입시간 (분)</label><input data-t="t1" value="${rn.t1}" inputmode="decimal" aria-label="간선 유입시간"><input data-t="t2" value="${rn.t2}" inputmode="decimal" aria-label="지선 유입시간">`;
   f+=`<label>간선 기준 관경</label><div style="grid-column:span 2;display:flex;gap:6px;align-items:center"><input data-t="mainDia" value="${rn.mainDia}" inputmode="decimal" aria-label="간선 기준 관경"><span class="hint" title="BOX는 같은 단면적 기준">mm 이상</span></div>`;
+  if(rn.type3===1)f+=`<label for="rainOrder" style="grid-column:1">식 형태</label><select id="rainOrder" style="grid-column:2 / span 2;border:1px solid var(--line);border-radius:5px;background:var(--panel2);padding:3px 6px;font-size:12.5px"><option value="std"${rn.swap?'':' selected'}>a / (t^b + c)  표준</option><option value="swap"${rn.swap?' selected':''}>a / (b + t^c)  PipeTools 7.0 결과와 비교용</option></select>`;
   if(rn.type3<1||rn.type3>8)f+=`<div class="err" style="grid-column:1/-1">이 강우강도 형식은 아직 계산하지 않습니다.</div>`;
   else if(rn.type3===8)f+=`<div class="hint" style="grid-column:1/-1">TYPE8 국토교통부 전대수다항식은 PipeTools 개발사 답변 예제(t = 10.27분 → 190.34 mm/hr)와 소수 6자리까지 일치합니다. PipeTools 7.0 수정 전 결과는 Sherman 근사 오류로 다를 수 있습니다.</div>`;
   else if(rn.type3!==1)f+=`<div class="hint" style="grid-column:1/-1">TYPE3=${rn.type3} 식은 표준 형태로 구현했고 PipeTools 결과로는 아직 검증하지 않았습니다 (TYPE1 General은 검증 완료).</div>`;
   if(document.activeElement&&$('#rainForm').contains(document.activeElement))return;
   $('#rainForm').innerHTML=f;
 }
+$('#rainForm').addEventListener('change',e=>{if(e.target.id!=='rainOrder'||!doc.rain)return;doc.rain.swap=e.target.value==='swap';render();
+  toast(doc.rain.swap?'a/(b + t^c) 형태로 계산합니다 (PipeTools 7.0 결과와 비교용)':'a/(t^b + c) 표준 형태로 계산합니다');},true);
 // 계수를 바꾸면 수리시트 2행(옵션 값)에도 반영해 내보낼 때 같이 나간다
 $('#rainForm').addEventListener('change',e=>{
   const el=e.target,rn=doc.rain;if(!rn)return;const v=parseFloat(el.value);if(!isFinite(v)){toast('숫자를 입력하세요');renderRain();return;}
