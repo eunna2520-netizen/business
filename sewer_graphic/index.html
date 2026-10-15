@@ -206,6 +206,8 @@ button,.tab{touch-action:manipulation}
           <div class="tabs" id="tabs"></div>
           <button id="bRange" title="두 맨홀 사이 관저를 한 경사로 일직선 정리">구간 일직선</button>
           <div class="seg" role="group" aria-label="수면 계산"><button id="wU" class="on" title="관로마다 등류(Manning) 수심">등류</button><button id="wG" title="방류구 수위에서 상류로 표준축차법 수면곡선">부등류</button></div>
+          <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="방류구 하류단 수위 (하천·바다 수위). 비우면 자유/등류. 입력하면 부등류로 계산">외수위 <input id="tailWL" type="number" step="0.01" inputmode="decimal" placeholder="자유" style="width:64px"> m</label>
+          <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="우수 강우강도 배율 (확률강우 증가 검토). 우수 계산에만 적용">강우 ×<input id="rainScale" type="number" step="0.05" min="0.1" value="1" inputmode="decimal" style="width:54px"></label>
           <div class="seg" role="group" aria-label="표시"><button id="vVel" class="on" title="관 위 표시: 실유속">유속</button><button id="vCap" title="관 위 표시: 유량비 Q/Qfull">통수능</button></div>
           <div class="seg" role="group" aria-label="가로 축척"><button id="zOut" aria-label="축소">－</button><button id="zFit" title="노선 전체를 화면에">전체</button><button id="zIn" aria-label="확대">＋</button></div>
           <div class="sp"></div>
@@ -445,13 +447,13 @@ function gvfPipe(p,q,n,yDn,yn,yc,N=20){
 function gvfNetwork(pipes,out,crit){
   const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
   const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
-  const done=new Set();
+  const done=new Set();out.flood=new Map();
   const solve=(p,Hnode)=>{
     if(done.has(p.id))return;done.add(p.id);
     const r=out.get(p.id),nb=Math.max(1,+p.nb||1),q=r.Q/nb,n=+p.n||0.013,D=secH(p);
     const yc=critDepth(p,q),yn=r.sur?D*2:r.h;
     let yDn;
-    if(Hnode==null){const m=/FIXED\s*=\s*(-?[\d.]+)/i.exec(String(p.note||''));yDn=m?Math.max(+m[1]-p.invDn,yc):(r.sur?D:Math.max(yn,yc));}
+    if(Hnode==null){const m=/FIXED\s*=\s*(-?[\d.]+)/i.exec(String(p.note||'')),tw=crit.tailWL!=null&&isFinite(crit.tailWL)?+crit.tailWL:(m?+m[1]:null);yDn=tw!=null?Math.max(tw-p.invDn,yc):(r.sur?D:Math.max(yn,yc));}   // 방류구 외수위: 화면 입력 > 비고 FIXED=수위 > 자유/등류
     else yDn=Math.max(Hnode-p.invDn,yc);   // 맨홀 수위가 한계수심보다 낮으면 자유낙하
     if(isPump(p))yDn=Math.max(yDn,D);   // 압송관은 만관 압력흐름: 동수위 = 하류 + 마찰손실
     const pts=isPump(p)?[{x:0,y:yDn+p.invDn-p.invUp+frictionS(p,q,D*2,n)*p.L},{x:p.L,y:yDn}]:gvfPipe(p,q,n,yDn,yn,yc);
@@ -464,6 +466,9 @@ function gvfNetwork(pipes,out,crit){
     else if(fullLen>0.01){label=`UP-INSIDE(x:${fullLen.toFixed(2)})`;gst=2;}
     const V=pts.map(t=>q/geomAt(p,Math.min(t.y,D*2)).A);
     r.g={pts,yUp,yDn,Hup,Hdn,yc,yn,fullLen,label,Vup:V[0],Vdn:V[V.length-1]};
+    // 침수 맨홀: 맨홀 수위(= 상류단 수위, 방류구는 하류단 수위)가 지반고를 넘으면
+    const fl=(n,H,gh)=>{const ex=H-gh;if(ex>0.001)out.flood.set(n,Math.max(out.flood.get(n)||0,ex));};
+    fl(p.up,Hup,p.ghUp);if(Hnode==null)fl(p.dn,Hdn,p.ghDn);
     if(gst){r.rem.push(label);if(gst>r.st)r.st=gst;r.marginOK=false;}
     (byDn.get(p.up)||[]).forEach(q2=>solve(q2,Hup));
   };
@@ -499,11 +504,11 @@ function compute(pipes,crit,rain=null){
       const tc=Math.max(hasUp?Ru:0,+p.tin>0?+p.tin:base);
       let V=hydOf(p,0).Vfull||1,R=tc,I=0,Qr=0,it=0;
       for(;it<30;it++){
-        R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R));Qr=CA*I/360;
+        R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R)*(crit.rainScale||1));Qr=CA*I/360;
         const u=hydOf(p,Qs+Qr);const Vn=(Qs+Qr)>0&&u.V>0?u.V:(u.Vfull||V);
         if(Math.abs(Vn-V)<1e-6){V=Vn;break;}V=Vn;
       }
-      R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R));Qr=CA*I/360;
+      R=tc+p.L/(60*Math.max(V,0.05));I=Math.max(0,rainI(rain,cls,R)*(crit.rainScale||1));Qr=CA*I/360;
       Object.assign(r,{cls,tc,R,I,Qr,Q:Qs+Qr,iter:it,rainL:(+p.C||0)*(+p.area||0)*I/360});
     }
     stack.delete(p.id);memo.set(p.id,r);return r;
@@ -895,7 +900,8 @@ function renderSummary(){
     `<span class="chip good">적합 ${c[0]}</span><span class="chip warn">주의 ${c[1]}</span><span class="chip bad">불량 ${c[2]}</span>`+
     (()=>{const nc=[...res.values()].filter(r=>r.coverNG).length,no=[...res.values()].filter(r=>r.obsHits.length).length;
       const nch=pipes.filter(p=>changedKeys(p).length).length;
-      return (nch?`<button class="chip chg" id="chgChip" title="불러온 값과 달라진 관로">변경 ${nch}</button>`:'')+(nc?`<span class="chip flag">토피 부족 ${nc}</span>`:'')+(no?`<span class="chip flag">지장물 근접 ${no}</span>`:'');})();
+      const nf=res.flood?res.flood.size:0;
+      return (nch?`<button class="chip chg" id="chgChip" title="불러온 값과 달라진 관로">변경 ${nch}</button>`:'')+(nf?`<span class="chip bad" title="부등류 수위가 지반고를 넘는 맨홀">침수 맨홀 ${nf}</span>`:'')+(nc?`<span class="chip flag">토피 부족 ${nc}</span>`:'')+(no?`<span class="chip flag">지장물 근접 ${no}</span>`:'');})();
 }
 function renderTabs(){
   $('#tabs').innerHTML=[...routes.keys()].map(k=>{
@@ -975,8 +981,9 @@ function renderPlan(){
   // 3) 맨홀
   const routeNodes=new Set();ch.forEach(p=>{routeNodes.add(p.up);routeNodes.add(p.dn);});
   const nodes=new Set();pipes.forEach(p=>{nodes.add(p.up);nodes.add(p.dn);});
-  nodes.forEach(n=>{const q=pos[n];if(!q)return;const on=routeNodes.has(n);
-    h+=`<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="${on?4.2:3.2}" fill="var(--panel)" stroke="${on?'var(--accent)':'var(--muted)'}" stroke-width="${on?1.8:1}"/>`+
+  nodes.forEach(n=>{const q=pos[n];if(!q)return;const on=routeNodes.has(n),fx=res.flood&&res.flood.get(n);
+    h+=(fx?`<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="9" fill="var(--bad)" opacity=".25"><title>${esc(n)} 침수 +${fx.toFixed(2)} m</title></circle>`:'')+
+       `<circle cx="${X(q[0])}" cy="${Y(q[1])}" r="${on?4.2:3.2}" fill="${fx?'var(--bad)':'var(--panel)'}" stroke="${fx?'var(--bad)':on?'var(--accent)':'var(--muted)'}" stroke-width="${on?1.8:1}"/>`+
        (!free(X(q[0])+5,Y(q[1])-15,n.length*6,11)?'':`<text x="${X(q[0])+5}" y="${Y(q[1])-6}" font-size="9.5" fill="${on?'var(--ink)':'var(--muted)'}" font-weight="${on?600:400}" opacity="${on?1:.7}">${esc(n)}</text>`);});
   // 4) 노선명 표지 (시점 맨홀 옆)
   const st=pos[ch[0].up];
@@ -1040,7 +1047,10 @@ function renderProfile(){
     let low=Infinity;pipes.forEach(p=>{if(p.up===n)low=Math.min(low,p.invUp);if(p.dn===n)low=Math.min(low,p.invDn);});
     const inR=ui.range&&(i===ui.range.i0||i===ui.range.i1);
     if(ui.range)h+=`<rect data-mh="${i}" x="${x-14}" y="${Y(gh)-20}" width="28" height="${Y(low-0.12)-Y(gh)+20}" fill="transparent" style="cursor:pointer"/>`;
-    h+=`<rect x="${x-MW/2}" y="${Y(gh)}" width="${MW}" height="${Y(low-0.12)-Y(gh)}" fill="${inR?'var(--accent-soft)':'var(--panel)'}" stroke="${inR?'var(--accent)':'var(--ink)'}" stroke-width="${inR?2:1.1}" pointer-events="none"/>`+
+    const fx=res.flood&&res.flood.get(n);
+    if(fx)h+=`<rect x="${x-MW/2-3}" y="${Y(gh+fx)}" width="${MW+6}" height="${Math.max(2,Y(gh)-Y(gh+fx))}" fill="var(--bad)" opacity=".5" pointer-events="none"/>`+
+      `<text x="${x}" y="${Y(gh+fx)-4}" font-size="10" font-weight="700" text-anchor="middle" fill="var(--bad)" pointer-events="none">침수 +${fx.toFixed(2)}</text>`;
+    h+=`<rect x="${x-MW/2}" y="${Y(gh)}" width="${MW}" height="${Y(low-0.12)-Y(gh)}" fill="${inR?'var(--accent-soft)':'var(--panel)'}" stroke="${fx?'var(--bad)':inR?'var(--accent)':'var(--ink)'}" stroke-width="${fx?2:inR?2:1.1}" pointer-events="none"/>`+
        (x-lastName>=n.length*6.6+6||i===g.nodes.length-1&&x-lastName>20?`<text x="${x}" y="${Y(gh)-7}" font-size="10.5" font-weight="600" text-anchor="middle" fill="var(--ink)">${esc(n)}</text>`:'');
     if(x-lastName>=n.length*6.6+6)lastName=x;
   });
@@ -1309,6 +1319,8 @@ function renderCap(){
 }
 $('#capChart').addEventListener('click',e=>{const t=e.target.closest('[data-pid]');if(!t)return;ui.sel=t.dataset.pid;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();});
 const setGvf=on=>{crit.gvf=!!on;render();};
+$('#tailWL').onchange=e=>{const v=e.target.value.trim();crit.tailWL=v===''?null:+v;if(v!=='')crit.gvf=true;render();};
+$('#rainScale').onchange=e=>{const v=+e.target.value;crit.rainScale=v>0?v:1;render();};
 $('#wU').onclick=()=>setGvf(false);$('#wG').onclick=()=>setGvf(true);
 const setView=v=>{ui.view=v;$('#vVel').classList.toggle('on',v!=='cap');$('#vCap').classList.toggle('on',v==='cap');render();};
 $('#vVel').onclick=()=>setView('vel');$('#vCap').onclick=()=>setView('cap');
@@ -1483,7 +1495,7 @@ $('#bUndo').onclick=doUndo;$('#bRedo').onclick=doRedo;
 function loadSeed(){const sheets=JSON.parse($('#seedBC').textContent);loadSheets(sheets,{fileName:'BC (업로드 자료)'});}
 $('#bSeed').onclick=()=>loadSeed();
 $('#bStorm').onclick=()=>{loadSheets(JSON.parse($('#seedStorm').textContent),{fileName:'우수 예제 (PipeTools 샘플)'});$('#dlg').hidden=true;};
-$('#bReset').onclick=()=>{doc.profiles.clear();doc.hydHead=null;doc.file='';doc.rpt=new Map();doc.rain=null;crit.gvf=false;applyModeDefaults();ui.cmp=false;ui.qd=false;edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});snapBase();selectRoute(routesOf(pipes).keys().next().value);};
+$('#bReset').onclick=()=>{crit.tailWL=null;crit.rainScale=1;$('#tailWL').value='';$('#rainScale').value='1';doc.profiles.clear();doc.hydHead=null;doc.file='';doc.rpt=new Map();doc.rain=null;crit.gvf=false;applyModeDefaults();ui.cmp=false;ui.qd=false;edit(()=>{pipes=SAMPLE.map(rowToPipe);ui.yFrame=null;});snapBase();selectRoute(routesOf(pipes).keys().next().value);};
 $('#cCovMode').addEventListener('change',e=>{crit.coverMode=e.target.value;render();});
 const CRIT_IDS={cVmin:'vmin',cVmax:'vmax',cVlow:'vlow',cCover:'cover',cCoverB:'coverBox',cAllowC:'allowCirc',cAllowB:'allowBox',cClear:'clear'};
 Object.keys(CRIT_IDS).forEach(id=>$('#'+id).addEventListener('input',e=>{const v=parseFloat(e.target.value);if(!isFinite(v))return;
