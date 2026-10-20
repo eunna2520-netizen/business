@@ -1504,8 +1504,7 @@ $('#bDxf').onclick=async()=>{
    - 표층+기층(asp)은 터파기 폭 B 로 수직 절단, 터파기는 asp 깊이부터. 오픈컷(OP)은 바닥폭 w 에서 구배로 올라가 B = w + 2·구배·(Hb−asp)
    - 간이흙막이·SHEET PILE·H-PILE(GA/SP/HP)은 수직: B = 관폭 + 2(흙막이 이격 + 흙막이 두께)  ※ 흙막이 두께 0.15 는 샘플(D200 → B=1.50)에 맞춘 값, 확인 필요
    - 관보호공(-B): 바닥은 관저−보호공 이격, 바닥폭 = 관폭 + 2·흙막이 이격 (샘플 맞춤), 보호공 상자 = (관폭+2·이격)×(관높이+2·이격)
-   - 터파기 = 면적(asp→Hb), 보조기층 = 면적(asp→min(보조기층 하단, 석분 상단)), 석분 = 면적(max(asp, 관상단−석분상단여유) → Hb) − 관 단면적, 관상단 되메우기 = 면적(보조기층 하단 → 석분 상단) (보호공이면 전체 − 보호공 상자).
-     토피가 얕아 석분 상단이 보조기층보다 위로 올라가면 석분을 우선하고 보조기층에서 그만큼 뺀다(석분 상단은 표층+기층 하단까지만). 이 경우는 PipeTools 방식 미확인 */
+   - 터파기 = 면적(asp→Hb), 보조기층 = 면적(asp→asp+보조기층), 석분 = 면적(관상단+200 → Hb) − 관 단면적, 관상단 되메우기 = 면적(포장 아래 → 석분 상단) (보호공이면 전체 − 보호공 상자) */
 const XS={bot:0.1,openGap:0.2,shoreGap:0.5,shoreT:0.15,protGap:0.2,slope:0.5,sandUp:0.2,pv:[50,150,250]};
 function xsGeom(p,gh,inv,code,par=XS){
   const pw=isBox(p)?+p.W:(+p.D)/1000,ph=secH(p),c=String(code||'').trim(),prot=isProt(c),shore=/^(GA|SP|HP)/i.test(c),nodig=/^(SC|PH)/i.test(c);
@@ -1514,9 +1513,9 @@ function xsGeom(p,gh,inv,code,par=XS){
   if(shore){B=pw+2*(par.shoreGap+par.shoreT);w=B;wd=()=>B;}
   else{w=prot?pw+2*par.shoreGap:pw+2*par.openGap;wd=d=>w+2*par.slope*(Hb-d);B=wd(asp);}
   const area=(d0,d1)=>d1>d0?(wd(d0)+wd(d1))/2*(d1-d0):0;
-  const sandTop=Math.max(asp,dCrown-par.sandUp),box={w:pw+2*par.protGap,h:ph+2*par.protGap},pipeA=isBox(p)?pw*ph:Math.PI*pw*pw/4;
-  const q={cut:area(asp,Hb),base:area(asp,Math.min(tp,sandTop)),back:prot?area(tp,Hb)-box.w*box.h:area(tp,sandTop),sand:prot?0:Math.max(0,area(sandTop,Hb)-pipeA)};
-  return{warn:!prot&&sandTop<tp-1e-9,pw,ph,prot,shore,nodig,asp,tp,dInv,dCrown,Hb,w,B,wd,sandTop,box,pipeA,q,gh,inv,code:c,cover:dCrown,isBox:isBox(p)};
+  const sandTop=Math.max(tp,dCrown-par.sandUp),box={w:pw+2*par.protGap,h:ph+2*par.protGap},pipeA=isBox(p)?pw*ph:Math.PI*pw*pw/4;
+  const q={cut:area(asp,Hb),base:area(asp,tp),back:prot?area(tp,Hb)-box.w*box.h:area(tp,sandTop),sand:prot?0:Math.max(0,area(sandTop,Hb)-pipeA)};
+  return{pw,ph,prot,shore,nodig,asp,tp,dInv,dCrown,Hb,w,B,wd,sandTop,box,pipeA,q,gh,inv,code:c,cover:dCrown,isBox:isBox(p)};
 }
 // 노선의 각 맨홀 위치 단면 (PipeTools는 측점마다 한 장; 유출관 기준, 마지막은 유입관)
 function xsList(){
@@ -1552,7 +1551,7 @@ const xsRows=G=>[['측점',''],['지반고',f2(G.gh)+' m'],['관저고',f2(G.inv
 function renderXsec(){
   const box=$('#xsGrid');if(!box)return;const list=xsList();
   box.innerHTML=list.map((it,k)=>{const G=it.G;
-    return`<div class="xscell"><div class="xshead"><b>${esc(it.n)}</b> <span class="mono">${it.ch.toFixed(2)}m · ${esc(G.code||'-')}${G.shore?' · 흙막이':G.nodig?'':' · 오픈컷'}${G.prot?' · 보호공':''}${G.warn?' · <span style="color:var(--bad)">석분이 보조기층 침범(토피 부족)</span>':''}</span></div>${xsSvg(it,k)}`+
+    return`<div class="xscell"><div class="xshead"><b>${esc(it.n)}</b> <span class="mono">${it.ch.toFixed(2)}m · ${esc(G.code||'-')}${G.shore?' · 흙막이':G.nodig?'':' · 오픈컷'}${G.prot?' · 보호공':''}</span></div>${xsSvg(it,k)}`+
       (G.nodig?'':`<table class="xst">${xsRows(G).slice(1).map(r=>`<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('')}</table>`)+`</div>`;}).join('');
   const t=list.filter(it=>!it.G.nodig).reduce((a,it)=>({cut:a.cut+it.G.q.cut}),{cut:0});$('#xsNote').textContent=`${list.length}개 맨홀 위치 · 터파기 단면적 합계 ${t.cut.toFixed(2)} m²(참고: 길이 방향 적분 아님)`;
 }
