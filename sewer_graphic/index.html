@@ -206,6 +206,7 @@ button,.tab{touch-action:manipulation}
           <div class="tabs" id="tabs"></div>
           <button id="bRange" title="두 맨홀 사이 관저를 한 경사로 일직선 정리">구간 일직선</button>
           <div class="seg" role="group" aria-label="수면 계산"><button id="wU" class="on" title="관로마다 등류(Manning) 수심">등류</button><button id="wG" title="방류구 수위에서 상류로 표준축차법 수면곡선">부등류</button></div>
+          <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="AutoCAD용 종단도(DXF). 가로 H, 세로 V 축척 (예: H=500, V=100)">H 1/<input id="dxfH" type="number" value="500" step="50" min="50" style="width:56px"> V 1/<input id="dxfV" type="number" value="100" step="10" min="10" style="width:52px"><button id="bDxf">DXF</button></label>
           <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="방류구 하류단 수위 (하천·바다 수위). 비우면 자유/등류. 입력하면 부등류로 계산">외수위 <input id="tailWL" type="number" step="0.01" inputmode="decimal" placeholder="자유" style="width:64px"> m</label>
           <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="우수 강우강도 배율 (확률강우 증가 검토). 우수 계산에만 적용">강우 ×<input id="rainScale" type="number" step="0.05" min="0.1" value="1" inputmode="decimal" style="width:54px"></label>
           <div class="seg" role="group" aria-label="표시"><button id="vVel" class="on" title="관 위 표시: 실유속">유속</button><button id="vCap" title="관 위 표시: 유량비 Q/Qfull">통수능</button></div>
@@ -1367,6 +1368,98 @@ function renderRain(){
 }
 $('#rainForm').addEventListener('change',e=>{if(e.target.id!=='rainOrder'||!doc.rain)return;doc.rain.swap=e.target.value==='swap';render();
   toast(doc.rain.swap?'a/(b + t^c) 형태로 계산합니다 (PipeTools 7.0 결과와 비교용)':'a/(t^b + c) 표준 형태로 계산합니다');},true);
+/* ---------- DXF 종단도 (AutoCAD R12 ASCII) ----------
+   도면 단위 = m (가로는 실제 측점 m), 세로는 (표고 - 기준고) × H/V 로 과장.
+   H=500, V=100 이면 1:500 용지에 출력할 때 가로 1:500, 세로 1:100 이 됩니다.
+   글자·간격은 용지 mm 기준 × H/1000 으로 환산. 한글은 \U+XXXX 로 쓰고, 글꼴은 txt.shx + whtgtxt.shx(큰 글꼴) */
+function buildDxf(H,V){
+  const g=routeGeom(),ex=H/V,mm=H/1000,th=2.5*mm,rh=7*mm,mw=3*mm,lw=34*mm;
+  let zlo=Infinity,zhi=-Infinity;
+  g.ch.forEach(p=>{zlo=Math.min(zlo,p.invUp,p.invDn);zhi=Math.max(zhi,p.ghUp,p.ghDn);
+    (p.st||[]).forEach(t=>{if(isFinite(t.g)){zlo=Math.min(zlo,t.g);zhi=Math.max(zhi,t.g);}});
+    (p.obs||[]).forEach(o=>{if(isFinite(o.inv)){zlo=Math.min(zlo,o.inv);zhi=Math.max(zhi,o.inv+o.h);}});
+    const rg=res.get(p.id)?.g;if(rg)zhi=Math.max(zhi,rg.Hup,rg.Hdn);});
+  const zd=Math.floor(zlo-0.5),Y=z=>(z-zd)*ex,fmt=v=>(+v).toFixed(4);
+  const out=[],add=(c,v)=>{out.push(String(c),String(v));};
+  const enc=s=>String(s).replace(/[^\x20-\x7e]/g,ch=>'\\U+'+ch.charCodeAt(0).toString(16).toUpperCase().padStart(4,'0'));
+  const LAY=[['GROUND',3],['PIPE',7],['MANHOLE',7],['WATER',5],['GRID',8],['TEXT',7],['TABLE',7],['OBSTACLE',6],['BRANCH',4],['FLOOD',1],['LABEL_GOOD',3],['LABEL_WARN',2],['LABEL_BAD',1]];
+  const line=(l,x1,y1,x2,y2)=>{add(0,'LINE');add(8,l);add(10,fmt(x1));add(20,fmt(y1));add(30,0);add(11,fmt(x2));add(21,fmt(y2));add(31,0);};
+  const poly=(l,pts,closed)=>{if(pts.length<2)return;add(0,'POLYLINE');add(8,l);add(66,1);add(70,closed?1:0);
+    pts.forEach(q=>{add(0,'VERTEX');add(8,l);add(10,fmt(q[0]));add(20,fmt(q[1]));add(30,0);});add(0,'SEQEND');add(8,l);};
+  const text=(l,x,y,s,h=th,al='c')=>{if(s===''||s==null)return;add(0,'TEXT');add(8,l);add(7,'KR');add(10,fmt(x));add(20,fmt(y));add(30,0);add(40,fmt(h));add(1,enc(s));
+    if(al!=='l'){add(72,al==='r'?2:1);add(73,0);add(11,fmt(x));add(21,fmt(y));add(31,0);}};
+  const ell=(l,cx,cy,rx,ry)=>poly(l,Array.from({length:24},(_,k)=>[cx+rx*Math.cos(k*Math.PI/12),cy+ry*Math.sin(k*Math.PI/12)]),true);
+  const total=g.total,xr=total+mw;
+  // 기준고 격자
+  const step=(zhi-zlo)>8?1:(zhi-zlo)>3?0.5:0.25;
+  for(let z=Math.ceil(zlo/step)*step;z<=zhi+1e-9;z+=step){line('GRID',-mw,Y(z),xr,Y(z));text('GRID',-mw*1.3,Y(z)-th*0.35,z.toFixed(2),th*0.8,'r');}
+  text('TEXT',-lw,Y(zhi)+th*3,`${ui.route} 종단도   H=1/${H}  V=1/${V}   D.L.=${zd.toFixed(2)} m`,th*1.2,'l');
+  // 지반선
+  const gp=[[0,Y(g.ch[0].ghUp)]];
+  g.ch.forEach((p,i)=>{gp.push([g.cs[i],Y(p.ghUp)]);(p.st||[]).forEach(t=>{if(isFinite(t.g))gp.push([g.cs[i]+t.c,Y(t.g)]);});gp.push([g.cs[i+1],Y(p.ghDn)]);});
+  poly('GROUND',gp,false);
+  // 맨홀
+  g.nodes.forEach((n,i)=>{
+    const x=g.cs[i],gh=i<g.ch.length?g.ch[i].ghUp:g.ch[i-1].ghDn;
+    let low=Infinity;pipes.forEach(p=>{if(p.up===n)low=Math.min(low,p.invUp);if(p.dn===n)low=Math.min(low,p.invDn);});
+    poly('MANHOLE',[[x-mw/2,Y(gh)],[x-mw/2,Y(low-0.12)],[x+mw/2,Y(low-0.12)],[x+mw/2,Y(gh)]],false);
+    text('TEXT',x,Y(gh)+th*0.8,n,th);
+    const fx=res.flood&&res.flood.get(n);
+    if(fx){poly('FLOOD',[[x-mw/2-th*0.3,Y(gh)],[x-mw/2-th*0.3,Y(gh+fx)],[x+mw/2+th*0.3,Y(gh+fx)],[x+mw/2+th*0.3,Y(gh)]],false);text('FLOOD',x,Y(gh+fx)+th*0.5,`침수 +${fx.toFixed(2)}`,th*0.9);}
+  });
+  // 관로 + 수면 + 라벨
+  g.ch.forEach((p,i)=>{
+    const r=res.get(p.id),D=secH(p),x1=g.cs[i]+mw/2,x2=g.cs[i+1]-mw/2,L=p.L;
+    poly('PIPE',[[x1,Y(p.invUp)],[x2,Y(p.invDn)],[x2,Y(p.invDn+D)],[x1,Y(p.invUp+D)]],true);
+    const hh=Math.min(r.h,D);
+    if(r.g){const zt=t=>p.invUp+(p.invDn-p.invUp)*t.x/L;poly('WATER',r.g.pts.map(t=>[x1+(x2-x1)*t.x/L,Y(zt(t)+Math.min(t.y,D))]),false);}
+    else if(hh>0)line('WATER',x1,Y(p.invUp+hh),x2,Y(p.invDn+hh));
+    const lay='LABEL_'+stCls(r.st).toUpperCase(),mx=(x1+x2)/2,cy=Y((p.invUp+p.invDn)/2+D);
+    if(L>=6*th){text(lay,mx,cy+th*1.9,`V ${r.V.toFixed(2)} m/s`,th);text('TEXT',mx,cy+th*0.5,`${secLabel(p)} · ${r.S.toFixed(2)}‰`,th*0.85);}
+  });
+  // 지장물, 분기 유입
+  g.ch.forEach((p,i)=>(p.obs||[]).forEach(o=>{
+    const x=g.cs[i]+Math.max(0,Math.min(p.L,o.off)),zc=o.inv+o.h/2;
+    if(o.box)poly('OBSTACLE',[[x-o.h/2,Y(o.inv)],[x+o.h/2,Y(o.inv)],[x+o.h/2,Y(o.inv+o.h)],[x-o.h/2,Y(o.inv+o.h)]],true);else ell('OBSTACLE',x,Y(zc),o.h/2,o.h/2*ex);
+    text('OBSTACLE',x+o.h/2+th*0.4,Y(zc)-th*0.35,`${o.name} ${o.size||''}`,th*0.8,'l');}));
+  g.nodes.forEach((n,i)=>pipes.filter(p=>p.dn===n&&p.line!==ui.route).forEach((p,k)=>{
+    const x=g.cs[i],D=secH(p);ell('BRANCH',x,Y(p.invDn+D/2),Math.max(D/2,0.2),Math.max(D/2,0.2)*ex);
+    text('BRANCH',x+Math.max(D/2,0.2)+th*0.4,Y(p.invDn+D/2)-th*0.35-k*th*1.3,`${p.line} ${f2(p.invDn)}`,th*0.8,'l');}));
+  // 하단 표
+  const rows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정','공법'],y0=-rh;
+  rows.forEach((t,k)=>{const yt=y0-k*rh;line('TABLE',-lw,yt,xr,yt);text('TABLE',-lw+th*0.5,yt-rh*0.7,t,th*0.9,'l');});
+  line('TABLE',-lw,y0-rows.length*rh,xr,y0-rows.length*rh);line('TABLE',-lw,y0,-lw,y0-rows.length*rh);line('TABLE',xr,y0,xr,y0-rows.length*rh);line('TABLE',-mw*1.5,y0,-mw*1.5,y0-rows.length*rh);
+  const cell=(x,k,s)=>text('TABLE',x,y0-k*rh-rh*0.7,s,th*0.9);
+  g.nodes.forEach((n,i)=>{
+    const x=g.cs[i],pin=g.ch[i-1],pout=g.ch[i],gh=pout?pout.ghUp:pin.ghDn,covs=[];
+    if(pin)covs.push(res.get(pin.id).covDn);if(pout)covs.push(res.get(pout.id).covUp);
+    line('TABLE',x,0,x,y0-4*rh);
+    cell(x,0,f2(gh));cell(x,1,pin?f2(pin.invDn):'-');cell(x,2,pout?f2(pout.invUp):'-');cell(x,3,f2(Math.min(...covs)));
+  });
+  g.ch.forEach((p,i)=>{
+    const r=res.get(p.id),mx=(g.cs[i]+g.cs[i+1])/2;if(p.L<6*th)return;
+    cell(mx,4,p.L.toFixed(2));cell(mx,5,r.S.toFixed(2));cell(mx,6,isBox(p)?`${p.W}x${p.D}`:String(p.D)+(+p.nb>1?`x${p.nb}`:''));
+    cell(mx,7,r.V.toFixed(2));cell(mx,8,r.rem[0]||'');cell(mx,9,p.code||'');
+  });
+  // 파일 조립
+  const head=[],hd=(c,v)=>head.push(String(c),String(v));
+  hd(0,'SECTION');hd(2,'HEADER');hd(9,'$ACADVER');hd(1,'AC1009');hd(9,'$INSBASE');hd(10,0);hd(20,0);hd(30,0);hd(9,'$EXTMIN');hd(10,fmt(-lw));hd(20,fmt(y0-rows.length*rh));hd(30,0);hd(9,'$EXTMAX');hd(10,fmt(xr));hd(20,fmt(Y(zhi)+th*5));hd(30,0);hd(0,'ENDSEC');
+  hd(0,'SECTION');hd(2,'TABLES');
+  hd(0,'TABLE');hd(2,'LTYPE');hd(70,1);hd(0,'LTYPE');hd(2,'CONTINUOUS');hd(70,0);hd(3,'Solid line');hd(72,65);hd(73,0);hd(40,0);hd(0,'ENDTAB');
+  hd(0,'TABLE');hd(2,'LAYER');hd(70,LAY.length+1);
+  [['0',7],...LAY].forEach(([n,c])=>{hd(0,'LAYER');hd(2,n);hd(70,0);hd(62,c);hd(6,'CONTINUOUS');});hd(0,'ENDTAB');
+  hd(0,'TABLE');hd(2,'STYLE');hd(70,1);hd(0,'STYLE');hd(2,'KR');hd(70,0);hd(40,0);hd(41,0.8);hd(50,0);hd(71,0);hd(42,fmt(th));hd(3,'txt.shx');hd(4,'whtgtxt.shx');hd(0,'ENDTAB');
+  hd(0,'ENDSEC');hd(0,'SECTION');hd(2,'ENTITIES');
+  const tail=[];tail.push('0','ENDSEC','0','EOF');
+  const lines=[...head,...out,...tail];let s='';for(let k=0;k<lines.length;k+=2)s+=lines[k]+'\r\n'+lines[k+1]+'\r\n';return s;
+}
+$('#bDxf').onclick=()=>{
+  const H=+$('#dxfH').value||500,V=+$('#dxfV').value||100;
+  const blob=new Blob([buildDxf(H,V)],{type:'application/dxf'}),a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=`${ui.route}_종단_H${H}V${V}.dxf`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+  toast(`DXF 종단도 저장 (가로 1/${H}, 세로 1/${V}) - 도면 단위 m, 세로 ${(H/V).toFixed(1)}배 과장`);
+};
+
 // 계수를 바꾸면 수리시트 2행(옵션 값)에도 반영해 내보낼 때 같이 나간다
 $('#rainForm').addEventListener('change',e=>{
   const el=e.target,rn=doc.rain;if(!rn)return;const v=parseFloat(el.value);if(!isFinite(v)){toast('숫자를 입력하세요');renderRain();return;}
