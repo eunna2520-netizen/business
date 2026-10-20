@@ -1386,7 +1386,7 @@ function buildDxf(H,V){
   const line=(l,x1,y1,x2,y2)=>{add(0,'LINE');add(8,l);add(10,fmt(x1));add(20,fmt(y1));add(30,0);add(11,fmt(x2));add(21,fmt(y2));add(31,0);};
   const poly=(l,pts,closed)=>{if(pts.length<2)return;add(0,'POLYLINE');add(8,l);add(66,1);add(70,closed?1:0);
     pts.forEach(q=>{add(0,'VERTEX');add(8,l);add(10,fmt(q[0]));add(20,fmt(q[1]));add(30,0);});add(0,'SEQEND');add(8,l);};
-  const text=(l,x,y,s,h=th,al='c')=>{if(s===''||s==null)return;add(0,'TEXT');add(8,l);add(7,'KR');add(10,fmt(x));add(20,fmt(y));add(30,0);add(40,fmt(h));add(1,enc(s));
+  const text=(l,x,y,s,h=th,al='c',rot=0)=>{if(s===''||s==null)return;add(0,'TEXT');add(8,l);add(7,'KR');add(10,fmt(x));add(20,fmt(y));add(30,0);add(40,fmt(h));add(1,enc(s));if(rot)add(50,rot);
     if(al!=='l'){add(72,al==='r'?2:1);add(73,0);add(11,fmt(x));add(21,fmt(y));add(31,0);}};
   const ell=(l,cx,cy,rx,ry)=>poly(l,Array.from({length:24},(_,k)=>[cx+rx*Math.cos(k*Math.PI/12),cy+ry*Math.sin(k*Math.PI/12)]),true);
   const total=g.total,xr=total+mw;
@@ -1403,14 +1403,14 @@ function buildDxf(H,V){
     const x=g.cs[i],gh=i<g.ch.length?g.ch[i].ghUp:g.ch[i-1].ghDn;
     let low=Infinity;pipes.forEach(p=>{if(p.up===n)low=Math.min(low,p.invUp);if(p.dn===n)low=Math.min(low,p.invDn);});
     poly('MANHOLE',[[x-mw/2,Y(gh)],[x-mw/2,Y(low-0.12)],[x+mw/2,Y(low-0.12)],[x+mw/2,Y(gh)]],false);
-    text('TEXT',x,Y(gh)+th*0.8,n,th);
+    text('TEXT',x+th*0.4,Y(gh)+th*0.8,`M/H ${n}  H=${(gh-low).toFixed(2)}m`,th*0.9,'l',90);
     const fx=res.flood&&res.flood.get(n);
     if(fx){poly('FLOOD',[[x-mw/2-th*0.3,Y(gh)],[x-mw/2-th*0.3,Y(gh+fx)],[x+mw/2+th*0.3,Y(gh+fx)],[x+mw/2+th*0.3,Y(gh)]],false);text('FLOOD',x,Y(gh+fx)+th*0.5,`침수 +${fx.toFixed(2)}`,th*0.9);}
   });
   // 관로 + 수면 + 라벨
   g.ch.forEach((p,i)=>{
-    const r=res.get(p.id),D=secH(p),x1=g.cs[i]+mw/2,x2=g.cs[i+1]-mw/2,L=p.L;
-    poly('PIPE',[[x1,Y(p.invUp)],[x2,Y(p.invDn)],[x2,Y(p.invDn+D)],[x1,Y(p.invUp+D)]],true);
+    const r=res.get(p.id),D=secH(p),x1=g.cs[i],x2=g.cs[i+1],L=p.L;   // 관은 맨홀에서 끊지 않고 측점(중심선)까지 잇는다 (PipeTools 종단과 같음)
+    line('PIPE',x1,Y(p.invUp),x2,Y(p.invDn));line('PIPE',x1,Y(p.invUp+D),x2,Y(p.invDn+D));
     const hh=Math.min(r.h,D);
     if(r.g){const zt=t=>p.invUp+(p.invDn-p.invUp)*t.x/L;poly('WATER',r.g.pts.map(t=>[x1+(x2-x1)*t.x/L,Y(zt(t)+Math.min(t.y,D))]),false);}
     else if(hh>0)line('WATER',x1,Y(p.invUp+hh),x2,Y(p.invDn+hh));
@@ -1425,20 +1425,27 @@ function buildDxf(H,V){
   g.nodes.forEach((n,i)=>pipes.filter(p=>p.dn===n&&p.line!==ui.route).forEach((p,k)=>{
     const x=g.cs[i],D=secH(p);ell('BRANCH',x,Y(p.invDn+D/2),Math.max(D/2,0.2),Math.max(D/2,0.2)*ex);
     text('BRANCH',x+Math.max(D/2,0.2)+th*0.4,Y(p.invDn+D/2)-th*0.35-k*th*1.3,`${p.line} ${f2(p.invDn)}`,th*0.8,'l');}));
-  // 하단 표
-  const rows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm','유속 m/s','판정','공법'],y0=-rh;
+  // 관로 치수선 (맨홀 사이 관로명 · 연장)
+  g.ch.forEach((p,i)=>{const xa=g.cs[i],xb=g.cs[i+1],yy=-rh*0.62;line('TABLE',xa,yy,xb,yy);line('TABLE',xa,yy-th*0.5,xa,yy+th*0.5);line('TABLE',xb,yy-th*0.5,xb,yy+th*0.5);
+    if(p.L>=5*th)text('TABLE',(xa+xb)/2,yy+th*0.35,`${p.id}  L=${p.L.toFixed(2)}M`,th*0.8);});
+  // 하단 표 (PipeTools 종단 순서: 경사·토피·관저고·지반고·누가거리·측점거리, 이어서 관경·유속·판정·공법)
+  const rows=['경 사','토 피','관 저 고','지 반 고','누가거리','측점거리','관 경 mm','유속 m/s','판 정','공 법'],y0=-rh;
   rows.forEach((t,k)=>{const yt=y0-k*rh;line('TABLE',-lw,yt,xr,yt);text('TABLE',-lw+th*0.5,yt-rh*0.7,t,th*0.9,'l');});
-  line('TABLE',-lw,y0-rows.length*rh,xr,y0-rows.length*rh);line('TABLE',-lw,y0,-lw,y0-rows.length*rh);line('TABLE',xr,y0,xr,y0-rows.length*rh);line('TABLE',-mw*1.5,y0,-mw*1.5,y0-rows.length*rh);
-  const cell=(x,k,s)=>text('TABLE',x,y0-k*rh-rh*0.7,s,th*0.9);
+  const yE=y0-rows.length*rh;line('TABLE',-lw,yE,xr,yE);line('TABLE',-lw,y0,-lw,yE);line('TABLE',xr,y0,xr,yE);line('TABLE',-mw*1.5,y0,-mw*1.5,yE);
+  const cell=(x,k,s,hh=th*0.9,dy=0.7)=>text('TABLE',x,y0-k*rh-rh*dy,s,hh);
   g.nodes.forEach((n,i)=>{
     const x=g.cs[i],pin=g.ch[i-1],pout=g.ch[i],gh=pout?pout.ghUp:pin.ghDn,covs=[];
     if(pin)covs.push(res.get(pin.id).covDn);if(pout)covs.push(res.get(pout.id).covUp);
-    line('TABLE',x,0,x,y0-4*rh);
-    cell(x,0,f2(gh));cell(x,1,pin?f2(pin.invDn):'-');cell(x,2,pout?f2(pout.invUp):'-');cell(x,3,f2(Math.min(...covs)));
+    line('TABLE',x,0,x,yE);
+    cell(x,1,f2(Math.min(...covs)));
+    const vi=pin?pin.invDn:null,vo=pout?pout.invUp:null;
+    if(vi!=null&&vo!=null&&Math.abs(vi-vo)>0.0005){cell(x,2,f2(vi),th*0.8,0.45);cell(x,2,f2(vo),th*0.8,0.9);}else cell(x,2,f2(vi!=null?vi:vo));
+    cell(x,3,f2(gh));cell(x,4,g.cs[i].toFixed(2));
   });
   g.ch.forEach((p,i)=>{
     const r=res.get(p.id),mx=(g.cs[i]+g.cs[i+1])/2;if(p.L<6*th)return;
-    cell(mx,4,p.L.toFixed(2));cell(mx,5,r.S.toFixed(2));cell(mx,6,isBox(p)?`${p.W}x${p.D}`:String(p.D)+(+p.nb>1?`x${p.nb}`:''));
+    cell(mx,0,`S=${r.S.toFixed(2)}\u2030`,th*0.8,0.4);cell(mx,0,`H=${(p.invUp-p.invDn).toFixed(2)} L=${p.L.toFixed(2)}`,th*0.7,0.85);
+    cell(mx,5,p.L.toFixed(2));cell(mx,6,isBox(p)?`${p.W}x${p.D}`:String(p.D)+(+p.nb>1?`x${p.nb}`:''));
     cell(mx,7,r.V.toFixed(2));cell(mx,8,r.rem[0]||'');cell(mx,9,p.code||'');
   });
   // 파일 조립
