@@ -1453,11 +1453,27 @@ function buildDxf(H,V){
   const tail=[];tail.push('0','ENDSEC','0','EOF');
   const lines=[...head,...out,...tail];let s='';for(let k=0;k<lines.length;k+=2)s+=lines[k]+'\r\n'+lines[k+1]+'\r\n';return s;
 }
-$('#bDxf').onclick=()=>{
-  const H=+$('#dxfH').value||500,V=+$('#dxfV').value||100;
-  const blob=new Blob([buildDxf(H,V)],{type:'application/dxf'}),a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);a.download=`${ui.route}_종단_H${H}V${V}.dxf`;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
-  toast(`DXF 종단도 저장 (가로 1/${H}, 세로 1/${V}) - 도면 단위 m, 세로 ${(H/V).toFixed(1)}배 과장`);
+/* 저장 크기 제한 없는 최소 ZIP (무압축 1파일). claude.ai 안에서는 .dxf 저장이 막혀 있어 zip 으로 묶어 내려받음 */
+const crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
+const crc32=b=>{let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=crcT[(c^b[i])&255]^(c>>>8);return(c^0xFFFFFFFF)>>>0;};
+function zipOne(name,data){
+  const nb=new TextEncoder().encode(name),crc=crc32(data),sz=data.length,cd0=30+nb.length+sz;
+  const out=new Uint8Array(cd0+46+nb.length+22),dv=new DataView(out.buffer);
+  dv.setUint32(0,0x04034b50,true);dv.setUint16(4,20,true);dv.setUint16(6,0x0800,true);dv.setUint16(12,0x21,true);
+  dv.setUint32(14,crc,true);dv.setUint32(18,sz,true);dv.setUint32(22,sz,true);dv.setUint16(26,nb.length,true);
+  out.set(nb,30);out.set(data,30+nb.length);
+  const c=cd0;dv.setUint32(c,0x02014b50,true);dv.setUint16(c+4,20,true);dv.setUint16(c+6,20,true);dv.setUint16(c+8,0x0800,true);dv.setUint16(c+14,0x21,true);
+  dv.setUint32(c+16,crc,true);dv.setUint32(c+20,sz,true);dv.setUint32(c+24,sz,true);dv.setUint16(c+28,nb.length,true);out.set(nb,c+46);
+  const e=c+46+nb.length;dv.setUint32(e,0x06054b50,true);dv.setUint16(e+8,1,true);dv.setUint16(e+10,1,true);dv.setUint32(e+12,46+nb.length,true);dv.setUint32(e+16,cd0,true);
+  return out;
+}
+$('#bDxf').onclick=async()=>{
+  const H=+$('#dxfH').value||500,V=+$('#dxfV').value||100,name=`${ui.route}_종단_H${H}V${V}.dxf`,data=new TextEncoder().encode(buildDxf(H,V));
+  const dl=window.claude&&await claude.use('downloads').catch(()=>null);
+  try{
+    if(dl){await dl.save({filename:name.replace(/\.dxf$/,'.zip'),data:zipOne(name,data)});toast('zip 저장됨 - 압축을 풀면 .dxf 입니다 (가로 1/'+H+', 세로 1/'+V+')');}
+    else{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/dxf'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);toast('DXF 저장 (가로 1/'+H+', 세로 1/'+V+')');}
+  }catch(err){if(!err||err.code!=='declined')toast('DXF 저장 실패: '+((err&&(err.message||err.code))||err));}
 };
 
 // 계수를 바꾸면 수리시트 2행(옵션 값)에도 반영해 내보낼 때 같이 나간다
