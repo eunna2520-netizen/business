@@ -57,6 +57,7 @@ th.cmp,td.cmp{background:var(--panel2)}
 .flagtxt{font-family:var(--mono);font-size:12px;color:var(--warn);border-bottom:1px dashed var(--warn)}
 .chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
+.xsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.xscell{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel2);min-width:0}.xshead{font-size:12px;margin-bottom:2px}svg.xs{width:100%;height:auto;display:block}.xst{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}.xst th,.xst td{border:1px solid var(--line);padding:1px 6px}.xst th{font-weight:400;color:var(--muted);text-align:left;width:46%}.xst td{text-align:right}.xsopt{margin-bottom:8px}.xsopt summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.xsparams{display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0;font-size:12px}.xsparams input{width:58px}
 .card-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
 .col{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -274,6 +275,14 @@ button,.tab{touch-action:manipulation}
         <p class="hint" style="margin:10px 0 0">설계유량 = (오수단위 × P.F + 지하수단위) × 누가인구 / 86,400,000 [m³/s]. 여유율은 관경 600 이하 100%, 700~1500 50%, 1650 이상 25% (하수도시설기준 오수관거). 유속은 계획시간최대오수량의 등류 실유속으로 판정하며, 최소유속 미만은 유지관리(주의), 유지관리 하한 미만은 불량으로 봅니다 (PipeTools 판정과 같은 구분). 토피·지장물 이격은 종합판정과 따로 표시합니다 (관보호공 적용 구간 등). 토피는 맨홀뿐 아니라 종단파일의 모든 측점에서 검토합니다.</p>
       </div>
     </div>
+  </div>
+
+  <div class="card" id="xsCard">
+    <div class="card-h"><h2>횡단면도 (매설 단면)</h2><span class="hint" id="xsNote"></span><div class="sp"></div><button id="bXsDxf" title="현재 노선의 횡단면도를 AutoCAD용 DXF(zip)로 저장">횡단 DXF</button></div>
+    <details class="xsopt"><summary>단면 기준 (PipeTools 횡단면도 옵션)</summary><div class="xsparams" id="xsParams"></div>
+      <div class="hint">오픈컷(OP)은 구배 단면, 간이흙막이·SHEET PILE·H-PILE(GA·SP·HP)은 수직 단면, 관보호공(-B)은 보호공 상자로 그립니다. 흙막이 두께 0.15 m는 PipeTools 샘플(D200 폭 1.50 m)에 맞춘 값이라 확인이 필요합니다.</div></details>
+    <svg width="0" height="0" style="position:absolute"><defs><pattern id="xsHatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="5" stroke="currentColor" stroke-width="1" style="color:var(--ink)"/></pattern></defs></svg>
+    <div class="xsgrid" id="xsGrid"></div>
   </div>
 
   <div class="card">
@@ -887,7 +896,7 @@ function render(){
   applyRange();
   if(!P(ui.sel)){ui.sel=routes.get(ui.route)[0].id;ui.handle=null;}
   res=compute(pipes,crit,doc.rain);
-  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();renderRangeBar();renderRain();renderCap();
+  renderSummary();renderTabs();renderPlan();renderProfile();renderSection();renderTable();renderMbar();renderRangeBar();renderRain();renderCap();renderXsec();
   $('#subTitle').textContent=`오수 원단위식 · Manning 등류 · ${doc.file||'가상 예제 관망 (본선 + 분기 3개)'}`;
   $('#wU').classList.toggle('on',!crit.gvf);$('#wG').classList.toggle('on',!!crit.gvf);
   $('#uS').classList.toggle('on',!ui.qd);$('#uD').classList.toggle('on',ui.qd);
@@ -1368,6 +1377,30 @@ function renderRain(){
 }
 $('#rainForm').addEventListener('change',e=>{if(e.target.id!=='rainOrder'||!doc.rain)return;doc.rain.swap=e.target.value==='swap';render();
   toast(doc.rain.swap?'a/(b + t^c) 형태로 계산합니다 (PipeTools 7.0 결과와 비교용)':'a/(t^b + c) 표준 형태로 계산합니다');},true);
+/* DXF 공용 도구 (AutoCAD R12 ASCII). 한글은 \U+XXXX, 글꼴 스타일 KR = txt.shx + whtgtxt.shx */
+const LAY0=[['GROUND',3],['PIPE',7],['MANHOLE',7],['WATER',5],['GRID',8],['TEXT',7],['TABLE',7],['OBSTACLE',6],['BRANCH',4],['FLOOD',1],['LABEL_GOOD',3],['LABEL_WARN',2],['LABEL_BAD',1],['SOIL',8],['HATCH',4],['DIM',2],['PROT',6]];
+function dxfKit(th,LAY){
+  const out=[],add=(c,v)=>{out.push(String(c),String(v));},fmt=v=>(+v).toFixed(4);
+  const enc=s=>String(s).replace(/[^\x20-\x7e]/g,ch=>'\\U+'+ch.charCodeAt(0).toString(16).toUpperCase().padStart(4,'0'));
+  const line=(l,x1,y1,x2,y2)=>{add(0,'LINE');add(8,l);add(10,fmt(x1));add(20,fmt(y1));add(30,0);add(11,fmt(x2));add(21,fmt(y2));add(31,0);};
+  const poly=(l,pts,closed)=>{if(pts.length<2)return;add(0,'POLYLINE');add(8,l);add(66,1);add(70,closed?1:0);
+    pts.forEach(q=>{add(0,'VERTEX');add(8,l);add(10,fmt(q[0]));add(20,fmt(q[1]));add(30,0);});add(0,'SEQEND');add(8,l);};
+  const text=(l,x,y,s,h=th,al='c',rot=0)=>{if(s===''||s==null)return;add(0,'TEXT');add(8,l);add(7,'KR');add(10,fmt(x));add(20,fmt(y));add(30,0);add(40,fmt(h));add(1,enc(s));if(rot)add(50,rot);
+    if(al!=='l'){add(72,al==='r'?2:1);add(73,0);add(11,fmt(x));add(21,fmt(y));add(31,0);}};
+  const ell=(l,cx,cy,rx,ry)=>poly(l,Array.from({length:24},(_,k)=>[cx+rx*Math.cos(k*Math.PI/12),cy+ry*Math.sin(k*Math.PI/12)]),true);
+  const circle=(l,cx,cy,r)=>{add(0,'CIRCLE');add(8,l);add(10,fmt(cx));add(20,fmt(cy));add(30,0);add(40,fmt(r));};
+  const finish=(x0,y0,x1,y1)=>{
+    const head=[],hd=(c,v)=>head.push(String(c),String(v));
+    hd(0,'SECTION');hd(2,'HEADER');hd(9,'$ACADVER');hd(1,'AC1009');hd(9,'$INSBASE');hd(10,0);hd(20,0);hd(30,0);hd(9,'$EXTMIN');hd(10,fmt(x0));hd(20,fmt(y0));hd(30,0);hd(9,'$EXTMAX');hd(10,fmt(x1));hd(20,fmt(y1));hd(30,0);hd(0,'ENDSEC');
+    hd(0,'SECTION');hd(2,'TABLES');
+    hd(0,'TABLE');hd(2,'LTYPE');hd(70,1);hd(0,'LTYPE');hd(2,'CONTINUOUS');hd(70,0);hd(3,'Solid line');hd(72,65);hd(73,0);hd(40,0);hd(0,'ENDTAB');
+    hd(0,'TABLE');hd(2,'LAYER');hd(70,LAY.length+1);
+    [['0',7],...LAY].forEach(([n,c])=>{hd(0,'LAYER');hd(2,n);hd(70,0);hd(62,c);hd(6,'CONTINUOUS');});hd(0,'ENDTAB');
+    hd(0,'TABLE');hd(2,'STYLE');hd(70,1);hd(0,'STYLE');hd(2,'KR');hd(70,0);hd(40,0);hd(41,0.8);hd(50,0);hd(71,0);hd(42,fmt(th));hd(3,'txt.shx');hd(4,'whtgtxt.shx');hd(0,'ENDTAB');
+    hd(0,'ENDSEC');hd(0,'SECTION');hd(2,'ENTITIES');
+    const lines=[...head,...out,'0','ENDSEC','0','EOF'];let s='';for(let k=0;k<lines.length;k+=2)s+=lines[k]+'\r\n'+lines[k+1]+'\r\n';return s;};
+  return{line,poly,text,ell,circle,finish};
+}
 /* ---------- DXF 종단도 (AutoCAD R12 ASCII) ----------
    도면 단위 = m (가로는 실제 측점 m), 세로는 (표고 - 기준고) × H/V 로 과장.
    H=500, V=100 이면 1:500 용지에 출력할 때 가로 1:500, 세로 1:100 이 됩니다.
@@ -1380,15 +1413,7 @@ function buildDxf(H,V){
     (p.obs||[]).forEach(o=>{if(isFinite(o.inv)){zlo=Math.min(zlo,o.inv);zhi=Math.max(zhi,o.inv+o.h);}});
     const rg=res.get(p.id)?.g;if(rg)zhi=Math.max(zhi,rg.Hup,rg.Hdn);});
   const zd=Math.floor(zlo-0.5),Y=z=>(z-zd)*ex,fmt=v=>(+v).toFixed(4);
-  const out=[],add=(c,v)=>{out.push(String(c),String(v));};
-  const enc=s=>String(s).replace(/[^\x20-\x7e]/g,ch=>'\\U+'+ch.charCodeAt(0).toString(16).toUpperCase().padStart(4,'0'));
-  const LAY=[['GROUND',3],['PIPE',7],['MANHOLE',7],['WATER',5],['GRID',8],['TEXT',7],['TABLE',7],['OBSTACLE',6],['BRANCH',4],['FLOOD',1],['LABEL_GOOD',3],['LABEL_WARN',2],['LABEL_BAD',1]];
-  const line=(l,x1,y1,x2,y2)=>{add(0,'LINE');add(8,l);add(10,fmt(x1));add(20,fmt(y1));add(30,0);add(11,fmt(x2));add(21,fmt(y2));add(31,0);};
-  const poly=(l,pts,closed)=>{if(pts.length<2)return;add(0,'POLYLINE');add(8,l);add(66,1);add(70,closed?1:0);
-    pts.forEach(q=>{add(0,'VERTEX');add(8,l);add(10,fmt(q[0]));add(20,fmt(q[1]));add(30,0);});add(0,'SEQEND');add(8,l);};
-  const text=(l,x,y,s,h=th,al='c',rot=0)=>{if(s===''||s==null)return;add(0,'TEXT');add(8,l);add(7,'KR');add(10,fmt(x));add(20,fmt(y));add(30,0);add(40,fmt(h));add(1,enc(s));if(rot)add(50,rot);
-    if(al!=='l'){add(72,al==='r'?2:1);add(73,0);add(11,fmt(x));add(21,fmt(y));add(31,0);}};
-  const ell=(l,cx,cy,rx,ry)=>poly(l,Array.from({length:24},(_,k)=>[cx+rx*Math.cos(k*Math.PI/12),cy+ry*Math.sin(k*Math.PI/12)]),true);
+  const K=dxfKit(th,LAY0),{line,poly,text,ell}=K;
   const total=g.total,xr=total+mw;
   // 기준고 격자
   const step=(zhi-zlo)>8?1:(zhi-zlo)>3?0.5:0.25;
@@ -1448,17 +1473,7 @@ function buildDxf(H,V){
     cell(mx,5,p.L.toFixed(2));cell(mx,6,isBox(p)?`${p.W}x${p.D}`:String(p.D)+(+p.nb>1?`x${p.nb}`:''));
     cell(mx,7,r.V.toFixed(2));cell(mx,8,r.rem[0]||'');cell(mx,9,p.code||'');
   });
-  // 파일 조립
-  const head=[],hd=(c,v)=>head.push(String(c),String(v));
-  hd(0,'SECTION');hd(2,'HEADER');hd(9,'$ACADVER');hd(1,'AC1009');hd(9,'$INSBASE');hd(10,0);hd(20,0);hd(30,0);hd(9,'$EXTMIN');hd(10,fmt(-lw));hd(20,fmt(y0-rows.length*rh));hd(30,0);hd(9,'$EXTMAX');hd(10,fmt(xr));hd(20,fmt(Y(zhi)+th*5));hd(30,0);hd(0,'ENDSEC');
-  hd(0,'SECTION');hd(2,'TABLES');
-  hd(0,'TABLE');hd(2,'LTYPE');hd(70,1);hd(0,'LTYPE');hd(2,'CONTINUOUS');hd(70,0);hd(3,'Solid line');hd(72,65);hd(73,0);hd(40,0);hd(0,'ENDTAB');
-  hd(0,'TABLE');hd(2,'LAYER');hd(70,LAY.length+1);
-  [['0',7],...LAY].forEach(([n,c])=>{hd(0,'LAYER');hd(2,n);hd(70,0);hd(62,c);hd(6,'CONTINUOUS');});hd(0,'ENDTAB');
-  hd(0,'TABLE');hd(2,'STYLE');hd(70,1);hd(0,'STYLE');hd(2,'KR');hd(70,0);hd(40,0);hd(41,0.8);hd(50,0);hd(71,0);hd(42,fmt(th));hd(3,'txt.shx');hd(4,'whtgtxt.shx');hd(0,'ENDTAB');
-  hd(0,'ENDSEC');hd(0,'SECTION');hd(2,'ENTITIES');
-  const tail=[];tail.push('0','ENDSEC','0','EOF');
-  const lines=[...head,...out,...tail];let s='';for(let k=0;k<lines.length;k+=2)s+=lines[k]+'\r\n'+lines[k+1]+'\r\n';return s;
+  return K.finish(-lw,y0-rows.length*rh,xr,Y(zhi)+th*5);
 }
 /* 저장 크기 제한 없는 최소 ZIP (무압축 1파일). claude.ai 안에서는 .dxf 저장이 막혀 있어 zip 으로 묶어 내려받음 */
 const crcT=(()=>{const t=[];for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0;}return t;})();
@@ -1482,6 +1497,112 @@ $('#bDxf').onclick=async()=>{
     else{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/dxf'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);toast('DXF 저장 (가로 1/'+H+', 세로 1/'+V+')');}
   }catch(err){if(!err||err.code!=='declined')toast('DXF 저장 실패: '+((err&&(err.message||err.code))||err));}
 };
+
+/* ---------- 횡단면도 (매설 단면) ----------
+   PipeTools 횡단면도 샘플(D200, 굴착하부-관저 100 · 오픈컷 이격 200 · 흙막이 이격 500 · 보호공 이격 200 · 구배 1:0.5 · 석분 상단 = 관상단+200 · 포장 50/150/250)과 수량표를 역산해 맞춘 규칙.
+   깊이 d 는 지반(G.L.)에서 아래로 잰다.
+   - 표층+기층(asp)은 터파기 폭 B 로 수직 절단, 터파기는 asp 깊이부터. 오픈컷(OP)은 바닥폭 w 에서 구배로 올라가 B = w + 2·구배·(Hb−asp)
+   - 간이흙막이·SHEET PILE·H-PILE(GA/SP/HP)은 수직: B = 관폭 + 2(흙막이 이격 + 흙막이 두께)  ※ 흙막이 두께 0.15 는 샘플(D200 → B=1.50)에 맞춘 값, 확인 필요
+   - 관보호공(-B): 바닥은 관저−보호공 이격, 바닥폭 = 관폭 + 2·흙막이 이격 (샘플 맞춤), 보호공 상자 = (관폭+2·이격)×(관높이+2·이격)
+   - 터파기 = 면적(asp→Hb), 보조기층 = 면적(asp→asp+보조기층), 석분 = 면적(관상단+200 → Hb) − 관 단면적, 관상단 되메우기 = 면적(포장 아래 → 석분 상단) (보호공이면 전체 − 보호공 상자) */
+const XS={bot:0.1,openGap:0.2,shoreGap:0.5,shoreT:0.15,protGap:0.2,slope:0.5,sandUp:0.2,pv:[50,150,250]};
+function xsGeom(p,gh,inv,code,par=XS){
+  const pw=isBox(p)?+p.W:(+p.D)/1000,ph=secH(p),c=String(code||'').trim(),prot=isProt(c),shore=/^(GA|SP|HP)/i.test(c),nodig=/^(SC|PH)/i.test(c);
+  const asp=(par.pv[0]+par.pv[1])/1000,tp=asp+par.pv[2]/1000,dInv=gh-inv,dCrown=dInv-ph,Hb=dInv+(prot?par.protGap:par.bot);
+  let w,B,wd;
+  if(shore){B=pw+2*(par.shoreGap+par.shoreT);w=B;wd=()=>B;}
+  else{w=prot?pw+2*par.shoreGap:pw+2*par.openGap;wd=d=>w+2*par.slope*(Hb-d);B=wd(asp);}
+  const area=(d0,d1)=>d1>d0?(wd(d0)+wd(d1))/2*(d1-d0):0;
+  const sandTop=Math.max(tp,dCrown-par.sandUp),box={w:pw+2*par.protGap,h:ph+2*par.protGap},pipeA=isBox(p)?pw*ph:Math.PI*pw*pw/4;
+  const q={cut:area(asp,Hb),base:area(asp,tp),back:prot?area(tp,Hb)-box.w*box.h:area(tp,sandTop),sand:prot?0:Math.max(0,area(sandTop,Hb)-pipeA)};
+  return{pw,ph,prot,shore,nodig,asp,tp,dInv,dCrown,Hb,w,B,wd,sandTop,box,pipeA,q,gh,inv,code:c,cover:dCrown,isBox:isBox(p)};
+}
+// 노선의 각 맨홀 위치 단면 (PipeTools는 측점마다 한 장; 유출관 기준, 마지막은 유입관)
+function xsList(){
+  const g=routeGeom();
+  return g.nodes.map((n,i)=>{const pout=g.ch[i],pin=g.ch[i-1],p=pout||pin;
+    return{n,ch:g.cs[i],p,G:xsGeom(p,pout?pout.ghUp:pin.ghDn,pout?pout.invUp:pin.invDn,p.code)};});
+}
+const xsLayerPts=G=>{ // 터파기 외곽 (G.L. 기준 x 중심, y 아래로 +)
+  const h=G.B/2,b=G.w/2;return G.shore?[[-h,0],[-h,G.Hb],[h,G.Hb],[h,0]]:[[-h,0],[-h,G.asp],[-b,G.Hb],[b,G.Hb],[h,G.asp],[h,0]];};
+const xsZone=(G,d0)=>{const hw=d=>G.wd(d)/2;return[[-hw(d0),d0],[-hw(G.Hb),G.Hb],[hw(G.Hb),G.Hb],[hw(d0),d0]];};   // d0~Hb 사이 사다리꼴
+function xsSvg(it,idx){
+  const G=it.G,Wv=270,Hv=230,gl=58,cx=135;
+  if(G.nodig)return`<svg viewBox="0 0 ${Wv} ${Hv}" class="xs"><text x="${cx}" y="${Hv/2}" font-size="12" text-anchor="middle" fill="var(--muted)">${esc(G.code)} 구간은 개착 단면 없음</text></svg>`;
+  const s=Math.min(125/(G.Hb+0.1),150/Math.max(G.B,0.3),90),X=x=>cx+x*s,Yd=d=>gl+d*s;
+  const poly=pts=>pts.map(q=>`${X(q[0]).toFixed(1)},${Yd(q[1]).toFixed(1)}`).join(' ');
+  let h=`<rect x="20" y="${gl}" width="${Wv-40}" height="${Hv-gl-6}" fill="var(--soil)" opacity=".6"/>`;
+  const pvd=[0,XS.pv[0]/1000,G.asp,G.tp];
+  h+=`<polygon points="${poly(xsLayerPts(G))}" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.6"/>`;
+  if(!G.prot&&G.sandTop<G.Hb)h+=`<polygon points="${poly(xsZone(G,G.sandTop))}" fill="url(#xsHatch)" stroke="var(--ink)" stroke-width=".8"/>`;
+  if(G.prot){const bx=G.box.w/2;h+=`<rect x="${X(-bx)}" y="${Yd(G.dInv+XS.protGap-G.box.h)}" width="${G.box.w*s}" height="${G.box.h*s}" fill="url(#xsHatch)" stroke="var(--ink)" stroke-width="1"/>`;}
+  pvd.forEach((d,k)=>{h+=`<line x1="${X(-G.B/2-0.8)}" y1="${Yd(d)}" x2="${X(G.B/2+0.8)}" y2="${Yd(d)}" stroke="var(--${k?'muted':'ink'})" stroke-width="${k?.7:1.6}"/>`;});
+  const pcy=Yd(G.dInv-G.ph/2);
+  h+=G.isBox?`<rect x="${X(-G.pw/2)}" y="${Yd(G.dCrown)}" width="${G.pw*s}" height="${G.ph*s}" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.2"/>`:`<circle cx="${cx}" cy="${pcy}" r="${Math.max(2,G.pw*s/2)}" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.2"/>`;
+  h+=`<line x1="${X(-G.B/2)}" y1="${gl-14}" x2="${X(G.B/2)}" y2="${gl-14}" stroke="var(--ink)"/><line x1="${X(-G.B/2)}" y1="${gl-18}" x2="${X(-G.B/2)}" y2="${gl-8}" stroke="var(--ink)"/><line x1="${X(G.B/2)}" y1="${gl-18}" x2="${X(G.B/2)}" y2="${gl-8}" stroke="var(--ink)"/>`+
+     `<text x="${cx}" y="${gl-19}" font-size="10.5" text-anchor="middle" fill="var(--ink)">B=${G.B.toFixed(2)}m</text>`+
+     `<line x1="${X(-G.B/2)-14}" y1="${gl}" x2="${X(-G.B/2)-14}" y2="${Yd(G.Hb)}" stroke="var(--ink)"/><text transform="translate(${X(-G.B/2)-17} ${(gl+Yd(G.Hb))/2}) rotate(-90)" font-size="10" text-anchor="middle" fill="var(--ink)">H=${G.Hb.toFixed(2)}m</text>`+
+     `<text x="${cx+8}" y="${gl-3}" font-size="9.5" fill="var(--ink)">G.H:${f2(G.gh)}</text><text x="${cx+8}" y="${Yd(G.Hb)+13}" font-size="9.5" fill="var(--ink)">INV:${f2(G.inv)}</text>`+
+     (G.shore?'':`<text x="${X(G.B/2)+4}" y="${(gl+Yd(G.Hb))/2}" font-size="9" fill="var(--muted)">1:${XS.slope}</text>`);
+  return`<svg viewBox="0 0 ${Wv} ${Hv}" class="xs">${h}</svg>`;
+}
+const q2=v=>(Math.round(v*100+1e-6)/100).toFixed(2);   // 0.5 올림 (PipeTools 표와 같은 반올림)
+const xsRows=G=>[['측점',''],['지반고',f2(G.gh)+' m'],['관저고',f2(G.inv)+' m'],['토피고',f2(G.cover)+' m'],['터파기',q2(G.q.cut)+' m²'],['관상단',q2(G.q.back)+' m²'],['석분부설',G.q.sand?q2(G.q.sand)+' m²':'-'],['보조기층',q2(G.q.base)+' m²'],['포장복구 폭',G.B.toFixed(2)+' m']];
+function renderXsec(){
+  const box=$('#xsGrid');if(!box)return;const list=xsList();
+  box.innerHTML=list.map((it,k)=>{const G=it.G;
+    return`<div class="xscell"><div class="xshead"><b>${esc(it.n)}</b> <span class="mono">${it.ch.toFixed(2)}m · ${esc(G.code||'-')}${G.shore?' · 흙막이':G.nodig?'':' · 오픈컷'}${G.prot?' · 보호공':''}</span></div>${xsSvg(it,k)}`+
+      (G.nodig?'':`<table class="xst">${xsRows(G).slice(1).map(r=>`<tr><th>${r[0]}</th><td>${r[1]}</td></tr>`).join('')}</table>`)+`</div>`;}).join('');
+  const t=list.filter(it=>!it.G.nodig).reduce((a,it)=>({cut:a.cut+it.G.q.cut}),{cut:0});$('#xsNote').textContent=`${list.length}개 맨홀 위치 · 터파기 단면적 합계 ${t.cut.toFixed(2)} m²(참고: 길이 방향 적분 아님)`;
+}
+/* 횡단 DXF 시트: 4열 격자, 1 unit = 1 m (S=1:100 용지 기준 글자 2.5mm = 0.25) */
+function buildXsDxf(){
+  const list=xsList(),th=0.25,K=dxfKit(th,LAY0),{line,poly,text,circle}=K,cw=13,ch=8.6,cols=4,rowsN=Math.ceil(list.length/cols);
+  text('TEXT',0,3,`${ui.route} 횡단면도   S=1:100`,th*1.6,'l');
+  const clip=(zone,x0,y0,x1,y1)=>{   // Cyrus-Beck: 볼록 다각형 안쪽 선분만
+    const ar=zone.reduce((a,q,i)=>{const r=zone[(i+1)%zone.length];return a+(q[0]*r[1]-r[0]*q[1]);},0),sg=ar>0?1:-1,dx=x1-x0,dy=y1-y0;let t0=0,t1=1;
+    for(let k=0;k<zone.length;k++){const a=zone[k],b=zone[(k+1)%zone.length],nx=-(b[1]-a[1])*sg,ny=(b[0]-a[0])*sg,num=nx*(x0-a[0])+ny*(y0-a[1]),den=nx*dx+ny*dy;
+      if(Math.abs(den)<1e-12){if(num<0)return null;continue;}
+      const t=-num/den;if(den>0)t0=Math.max(t0,t);else t1=Math.min(t1,t);}
+    return t0<t1?[x0+dx*t0,y0+dy*t0,x0+dx*t1,y0+dy*t1]:null;};
+  list.forEach((it,k)=>{
+    const G=it.G,ox=(k%cols)*cw+2.2,oy=-Math.floor(k/cols)*ch,Xx=x=>ox+x,Yy=d=>oy-d;   // oy = G.L., 아래로 갈수록 -
+    const tx=ox+3.2;
+    text('TEXT',ox,oy+1.3,`${it.n}   ${it.ch.toFixed(2)}m`,th,'c');
+    if(G.nodig){text('TEXT',ox,oy-1,`${G.code} 구간 개착 단면 없음`,th,'c');return;}
+    const hl=G.B/2+0.9;
+    [0,XS.pv[0]/1000,G.asp,G.tp].forEach((d,i)=>line(i?'SOIL':'GROUND',Xx(-hl),Yy(d),Xx(hl),Yy(d)));
+    poly('PIPE',xsLayerPts(G).map(q=>[Xx(q[0]),Yy(q[1])]),false);
+    const hatch=(zone)=>{poly('HATCH',zone.map(q=>[Xx(q[0]),Yy(q[1])]),true);const xs0=Math.min(...zone.map(q=>q[0])),xs1=Math.max(...zone.map(q=>q[0])),ys0=Math.min(...zone.map(q=>q[1])),ys1=Math.max(...zone.map(q=>q[1]));
+      for(let c=xs0-(ys1-ys0);c<=xs1;c+=0.12){const r=clip(zone,c,ys0,c+(ys1-ys0),ys1);if(r)line('HATCH',Xx(r[0]),Yy(r[1]),Xx(r[2]),Yy(r[3]));}};
+    if(!G.prot&&G.sandTop<G.Hb)hatch(xsZone(G,G.sandTop));
+    if(G.prot){const bx=G.box.w/2,top=G.dInv+XS.protGap-G.box.h;hatch([[-bx,top],[-bx,top+G.box.h],[bx,top+G.box.h],[bx,top]]);}
+    if(G.isBox)poly('PIPE',[[-G.pw/2,G.dCrown],[G.pw/2,G.dCrown],[G.pw/2,G.dInv],[-G.pw/2,G.dInv]].map(q=>[Xx(q[0]),Yy(q[1])]),true);else circle('PIPE',Xx(0),Yy(G.dInv-G.ph/2),G.pw/2);
+    // 치수·표고
+    const yb=Yy(-0.5);line('DIM',Xx(-G.B/2),yb,Xx(G.B/2),yb);line('DIM',Xx(-G.B/2),yb-0.15,Xx(-G.B/2),yb+0.15);line('DIM',Xx(G.B/2),yb-0.15,Xx(G.B/2),yb+0.15);text('DIM',Xx(0),yb+0.12,`B=${G.B.toFixed(2)}m`,th);
+    const xl=Xx(-hl-0.5);line('DIM',xl,Yy(0),xl,Yy(G.Hb));line('DIM',xl-0.15,Yy(0),xl+0.15,Yy(0));line('DIM',xl-0.15,Yy(G.Hb),xl+0.15,Yy(G.Hb));text('DIM',xl-0.1,Yy(G.Hb/2),`H=${G.Hb.toFixed(2)}m`,th,'c',90);
+    text('TEXT',Xx(0.3),Yy(0)+0.12,`G.H:${f2(G.gh)}`,th*0.9,'l');text('TEXT',Xx(0.3),Yy(G.Hb)-0.45,`INV:${f2(G.inv)}`,th*0.9,'l');
+    // 수량표
+    const rows=xsRows(G),tw=3.9,rh=0.42,x0=tx,y0=Yy(0.2);
+    rows.forEach((r,i)=>{const yy=y0-i*rh;line('TABLE',x0,yy,x0+tw,yy);
+      if(i===0)text('TABLE',x0+tw/2,yy-rh*0.72,`측점 : ${it.n}`,th*0.85);
+      else{text('TABLE',x0+0.15,yy-rh*0.72,r[0],th*0.85,'l');text('TABLE',x0+tw-0.15,yy-rh*0.72,r[1],th*0.85,'r');}});
+    const yE=y0-rows.length*rh;line('TABLE',x0,yE,x0+tw,yE);line('TABLE',x0,y0,x0,yE);line('TABLE',x0+tw,y0,x0+tw,yE);line('TABLE',x0+1.5,y0-rh,x0+1.5,yE);
+  });
+  return K.finish(0,-rowsN*ch,cols*cw+2,4);
+}
+$('#bXsDxf').onclick=async()=>{
+  const name=`${ui.route}_횡단.dxf`,data=new TextEncoder().encode(buildXsDxf());
+  const dl=window.claude&&await claude.use('downloads').catch(()=>null);
+  try{
+    if(dl){await dl.save({filename:name.replace(/\.dxf$/,'.zip'),data:zipOne(name,data)});toast('zip 저장됨 - 압축을 풀면 .dxf 입니다');}
+    else{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([data],{type:'application/dxf'}));a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);toast('횡단 DXF 저장');}
+  }catch(err){if(!err||err.code!=='declined')toast('DXF 저장 실패: '+((err&&(err.message||err.code))||err));}
+};
+(()=>{const P=[['xBot','bot','굴착하부-관저'],['xOpen','openGap','오픈컷 이격'],['xShore','shoreGap','흙막이 이격'],['xShoreT','shoreT','흙막이 두께'],['xProt','protGap','보호공 이격'],['xSand','sandUp','석분 상단(관상단+)'],['xSlope','slope','구배 1:']];
+  $('#xsParams').innerHTML=P.map(([id,k,t])=>`<label>${t} <input id="${id}" type="number" step="0.05" min="0" value="${XS[k]}" inputmode="decimal"></label>`).join('')+
+    ['표층','기층','보조기층'].map((t,i)=>`<label>${t} mm <input id="xP${i}" type="number" step="10" min="0" value="${XS.pv[i]}" inputmode="decimal"></label>`).join('');
+  $('#xsParams').addEventListener('change',e=>{const id=e.target.id,v=+e.target.value;if(!(v>=0))return;const hit=P.find(q=>q[0]===id);if(hit)XS[hit[1]]=v;else if(/^xP\d$/.test(id))XS.pv[+id[2]]=v;renderXsec();});})();
 
 // 계수를 바꾸면 수리시트 2행(옵션 값)에도 반영해 내보낼 때 같이 나간다
 $('#rainForm').addEventListener('change',e=>{
