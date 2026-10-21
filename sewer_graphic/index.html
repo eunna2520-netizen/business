@@ -58,6 +58,7 @@ th.cmp,td.cmp{background:var(--panel2)}
 .chip.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
 .xsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.xscell{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel2);min-width:0}.xshead{font-size:12px;margin-bottom:2px}svg.xs{width:100%;height:auto;display:block}.xst{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}.xst th,.xst td{border:1px solid var(--line);padding:1px 6px}.xst th{font-weight:400;color:var(--muted);text-align:left;width:46%}.xst td{text-align:right}.xsopt{margin-bottom:8px}.xsopt summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.xsparams{display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0;font-size:12px}.xsparams input{width:58px}
+.card.big{position:fixed;inset:0;z-index:60;margin:0;border-radius:0;overflow:auto;border:0}body.bigOn{overflow:hidden}#profWrap.panning,#profWrap.spacePan{cursor:grab}#profWrap.panning{cursor:grabbing}
 .card-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
 .col{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -201,7 +202,7 @@ button,.tab{touch-action:manipulation}
         <svg id="plan" aria-label="관망 평면 모식도"></svg>
       </div>
 
-      <div class="card">
+      <div class="card" id="profCard">
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
@@ -212,9 +213,10 @@ button,.tab{touch-action:manipulation}
           <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="우수 강우강도 배율 (확률강우 증가 검토). 우수 계산에만 적용">강우 ×<input id="rainScale" type="number" step="0.05" min="0.1" value="1" inputmode="decimal" style="width:54px"></label>
           <div class="seg" role="group" aria-label="표시"><button id="vVel" class="on" title="관 위 표시: 실유속">유속</button><button id="vCap" title="관 위 표시: 유량비 Q/Qfull">통수능</button></div>
           <div class="seg" role="group" aria-label="가로 축척"><button id="zOut" aria-label="축소">－</button><button id="zFit" title="노선 전체를 화면에">전체</button><button id="zIn" aria-label="확대">＋</button></div>
+          <button id="bBig" title="종단을 화면 가득 크게 보기 (F, 닫기 Esc)">⛶ 크게</button>
           <div class="sp"></div>
           <div class="hint touch-only">관저 점을 눌러 선택 → 위아래로 끌거나 하단 버튼(길게 누르면 연속)으로 조정 · 좌우로 밀면 종단 스크롤</div>
-          <div class="hint kbd-only">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동</div>
+          <div class="hint kbd-only">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동 · <b>휠</b> 확대·축소(커서 기준, <kbd>Shift</kbd> 가로만 · <kbd>Ctrl</kbd> 세로만) · <b>휠 버튼</b> 또는 <kbd>Space</kbd>+드래그 이동 · <kbd>Home</kbd> 전체 · <kbd>F</kbd> 크게 · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 되돌리기·다시하기</div>
         </div>
         <div class="rangebar" id="rangeBar" hidden>
           <strong>구간 일직선</strong>
@@ -921,7 +923,7 @@ function renderTabs(){
 $('#summary').addEventListener('click',e=>{if(e.target.closest('#cmpChip')){ui.cmp=!ui.cmp;render();return;}if(!e.target.closest('#chgChip'))return;
   $('#dlg').hidden=false;$('#pasteBox').value=changeList().join('\n');$('#pasteErr').textContent='불러온 값과 달라진 항목 (종단파일·수리시트 복사 시 이 값들이 반영됩니다)';});
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
-function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.hz=null;}ui.route=r;ui.yFrame=null;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
+function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.hz=null;}ui.route=r;ui.yFrame=null;ui.yManual=false;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
 
 /* ---------- 평면 ---------- */
 function layoutPlan(){
@@ -1019,6 +1021,7 @@ function routeGeom(){
 }
 function renderProfile(){
   const wrap=$('#profWrap'),svg=$('#prof');
+  PROF.PH=ui.big?Math.max(300,window.innerHeight-390):290;
   const g=routeGeom(),{L0,R0,top,PH,row}=PROF;
   const fitW=Math.max(760,wrap.clientWidth),avgL=g.total/g.ch.length;
   const fitPx=(fitW-PROF.L0-20-PROF.R0)/g.total;
@@ -1026,7 +1029,7 @@ function renderProfile(){
   const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm',ui.view==='cap'?'유량비 %':'유속 m/s','판정','공법'];
   const bandTop=top+PH+22,H=bandTop+bandRows.length*row+6;
   svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
-  if(!ui.yFrame||!drag){
+  if(!ui.yFrame||(!ui.yManual&&!drag)){
     let lo=Infinity,hi=-Infinity;
     g.ch.forEach(p=>{lo=Math.min(lo,p.invUp,p.invDn);hi=Math.max(hi,p.ghUp,p.ghDn);
       (p.st||[]).forEach(t=>{if(isFinite(t.g)){hi=Math.max(hi,t.g);lo=Math.min(lo,t.g);}});
@@ -1201,9 +1204,15 @@ svgP.addEventListener('pointerup',endDrag);svgP.addEventListener('pointercancel'
 
 /* 키보드 */
 document.addEventListener('keydown',e=>{
-  const tag=(e.target.tagName||'').toLowerCase();
-  if(tag==='input'||tag==='textarea'||tag==='select')return;
-  const mod=e.ctrlKey||e.metaKey;
+  const tag=(e.target.tagName||'').toLowerCase(),mod=e.ctrlKey||e.metaKey;
+  if(tag==='input'||tag==='textarea'||tag==='select'){   // 글자 입력칸은 기본 동작 유지, 숫자·선택칸은 앱 되돌리기
+    const textual=tag==='textarea'||(tag==='input'&&!/^(number|checkbox|radio|range|button)$/.test(e.target.type||''));
+    if(!(mod&&!textual&&/^[zy]$/i.test(e.key)))return;
+  }
+  if(!mod&&e.key==='Escape'&&ui.big){setBig(false);return;}
+  if(!mod&&(e.key==='f'||e.key==='F')){setBig(!ui.big);return;}
+  if(!mod&&e.key==='Home'){e.preventDefault();$('#zFit').click();return;}
+  if(e.key===' '&&!mod&&e.target===document.body){e.preventDefault();ui.space=true;$('#profWrap').classList.add('spacePan');return;}
   if(mod&&(e.key==='z'||e.key==='Z')&&!e.shiftKey){e.preventDefault();doUndo();return;}
   if(mod&&(e.key==='y'||((e.key==='z'||e.key==='Z')&&e.shiftKey))){e.preventDefault();doRedo();return;}
   if(!ui.handle)return;
@@ -1218,8 +1227,9 @@ document.addEventListener('keydown',e=>{
     moveHandle(e.key==='ArrowRight'?1:-1);
   }
 });
-function doUndo(){if(!undo.length)return;dropRange();redo.push(snapshot());pipes=JSON.parse(undo.pop());render();}
-function doRedo(){if(!redo.length)return;dropRange();undo.push(snapshot());pipes=JSON.parse(redo.pop());render();}
+function doUndo(){if(!undo.length){toast('되돌릴 작업이 없습니다');return;}dropRange();redo.push(snapshot());pipes=JSON.parse(undo.pop());render();toast(`되돌리기 (남은 ${undo.length}단계)`);}
+function doRedo(){if(!redo.length){toast('다시 할 작업이 없습니다');return;}dropRange();undo.push(snapshot());pipes=JSON.parse(redo.pop());render();toast(`다시하기 (남은 ${redo.length}단계)`);}
+document.addEventListener('keyup',e=>{if(e.key===' '){ui.space=false;$('#profWrap').classList.remove('spacePan');}});
 
 /* ---------- 단면 ---------- */
 function renderSection(){
@@ -1876,10 +1886,48 @@ $('#bRange').onclick=()=>{
   toast('시점·종점 맨홀을 골라 구간을 넓히세요 · 되돌리기 가능');
 };
 $('#rOff').onclick=()=>{ui.range=null;render();};
+
+/* ---------- CAD식 보기 조작 ----------
+   휠 = 커서 기준 확대·축소 (Shift+휠 = 가로만, Ctrl+휠 = 세로만), 휠 버튼 또는 Space+드래그 = 이동, Home = 전체, F = 크게 보기 */
+const wrapP=$('#profWrap');
+function zoomAt(f,cx,cy,mode){
+  const r=wrapP.getBoundingClientRect(),off=cx-r.left,X0=PROF.L0+20,c=(wrapP.scrollLeft+off-X0)/ui.pxm;
+  if(mode!=='v')ui.hz=Math.min(60,Math.max(ui.fitPx,ui.pxm*f));
+  if(mode!=='h'&&ui.yFrame){
+    const sr=svgP.getBoundingClientRect(),sc=sr.height/svgP.height.baseVal.value||1,ys=(cy-sr.top)/sc,{lo,hi}=ui.yFrame,ppm=PROF.PH/(hi-lo),z=hi-(ys-PROF.top)/ppm;
+    let nl=z-(z-lo)/f,nh=z+(hi-z)/f;if(nh-nl<0.15||nh-nl>400)return;
+    ui.yFrame={lo:nl,hi:nh};ui.yManual=true;
+  }
+  renderProfile();
+  wrapP.scrollLeft=X0+c*ui.pxm-off;
+}
+wrapP.addEventListener('wheel',e=>{
+  if(drag)return;e.preventDefault();
+  const dy=e.deltaMode===1?e.deltaY*30:e.deltaY,f=Math.pow(1.0018,-dy);
+  zoomAt(f,e.clientX,e.clientY,e.shiftKey?'h':(e.ctrlKey||e.metaKey)?'v':'both');
+},{passive:false});
+let pan=null;
+wrapP.addEventListener('mousedown',e=>{if(e.button===1)e.preventDefault();},true);
+wrapP.addEventListener('pointerdown',e=>{
+  if(!(e.button===1||(ui.space&&e.button===0)))return;
+  e.preventDefault();e.stopPropagation();
+  pan={x:e.clientX,y:e.clientY,sl:wrapP.scrollLeft,fr:ui.yFrame&&{...ui.yFrame}};wrapP.classList.add('panning');wrapP.setPointerCapture(e.pointerId);
+},true);
+wrapP.addEventListener('pointermove',e=>{
+  if(!pan)return;
+  wrapP.scrollLeft=pan.sl-(e.clientX-pan.x);
+  if(pan.fr){const sr=svgP.getBoundingClientRect(),sc=sr.height/svgP.height.baseVal.value||1,ppm=PROF.PH/(pan.fr.hi-pan.fr.lo),dz=(e.clientY-pan.y)/sc/ppm;
+    ui.yFrame={lo:pan.fr.lo+dz,hi:pan.fr.hi+dz};ui.yManual=true;renderProfile();}
+},true);
+const endPan=e=>{if(!pan)return;pan=null;wrapP.classList.remove('panning');};
+wrapP.addEventListener('pointerup',endPan,true);wrapP.addEventListener('pointercancel',endPan,true);
+function setBig(on){ui.big=!!on;$('#profCard').classList.toggle('big',ui.big);document.body.classList.toggle('bigOn',ui.big);$('#bBig').textContent=ui.big?'✕ 닫기':'⛶ 크게';ui.yManual=false;ui.yFrame=null;render();}
+$('#bBig').onclick=()=>setBig(!ui.big);
+window.addEventListener('resize',()=>{if(ui.big&&!drag)renderProfile();});
 const zoomTo=pxm=>{const w=$('#profWrap'),c=(w.scrollLeft+w.clientWidth/2)/Math.max(1,w.scrollWidth);ui.hz=pxm;renderProfile();w.scrollLeft=c*w.scrollWidth-w.clientWidth/2;};
 $('#zIn').onclick=()=>zoomTo((ui.pxm||1)*1.5);
 $('#zOut').onclick=()=>zoomTo(Math.max(ui.fitPx||0.1,(ui.pxm||1)/1.5));
-$('#zFit').onclick=()=>zoomTo(ui.fitPx);
+$('#zFit').onclick=()=>{ui.yManual=false;ui.yFrame=null;zoomTo(ui.fitPx);};
 $('#rFrom').onchange=e=>setRange(+e.target.value,ui.range.i1,ui.range.drop);
 $('#rTo').onchange=e=>setRange(ui.range.i0,+e.target.value,ui.range.drop);
 $('#rDrop').onchange=e=>{const v=parseFloat(e.target.value);setRange(ui.range.i0,ui.range.i1,isFinite(v)?v:0);};
