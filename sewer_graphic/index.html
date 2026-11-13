@@ -206,7 +206,7 @@ button,.tab{touch-action:manipulation}
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
-          <button id="bRange" title="두 맨홀 사이 관저를 한 경사로 일직선 정리">구간 일직선</button>
+          <button id="bRange" title="누른 뒤 종단에서 시작·끝 맨홀 두 개를 클릭(탭)하면 그 사이 관저를 한 경사로 일직선 정리. 데스크톱은 Shift+클릭 두 번도 가능">구간 일직선</button>
           <div class="seg" role="group" aria-label="수면 계산"><button id="wU" class="on" title="관로마다 등류(Manning) 수심">등류</button><button id="wG" title="방류구 수위에서 상류로 표준축차법 수면곡선">부등류</button></div>
           <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="AutoCAD용 종단도(DXF). 가로 H, 세로 V 축척 (예: H=500, V=100)">H 1/<input id="dxfH" type="number" value="500" step="50" min="50" style="width:56px"> V 1/<input id="dxfV" type="number" value="100" step="10" min="10" style="width:52px"><button id="bDxf">DXF</button></label>
           <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="방류구 하류단 수위 (하천·바다 수위). 비우면 자유/등류. 입력하면 부등류로 계산">외수위 <input id="tailWL" type="number" step="0.01" inputmode="decimal" placeholder="자유" style="width:64px"> m</label>
@@ -925,7 +925,7 @@ function renderTabs(){
 $('#summary').addEventListener('click',e=>{if(e.target.closest('#cmpChip')){ui.cmp=!ui.cmp;render();return;}if(!e.target.closest('#chgChip'))return;
   $('#dlg').hidden=false;$('#pasteBox').value=changeList().join('\n');$('#pasteErr').textContent='불러온 값과 달라진 항목 (종단파일·수리시트 복사 시 이 값들이 반영됩니다)';});
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
-function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.hz=null;}ui.route=r;ui.yFrame=null;ui.yManual=false;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
+function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.pick=null;ui.hz=null;}ui.route=r;ui.yFrame=null;ui.yManual=false;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
 
 /* ---------- 평면 ---------- */
 function layoutPlan(){
@@ -1064,13 +1064,13 @@ function renderProfile(){
     const x=X(g.cs[i]);
     const gh=i<g.ch.length?g.ch[i].ghUp:g.ch[i-1].ghDn;
     let low=Infinity;pipes.forEach(p=>{if(p.up===n)low=Math.min(low,p.invUp);if(p.dn===n)low=Math.min(low,p.invDn);});
-    const inR=ui.range&&(i===ui.range.i0||i===ui.range.i1);
-    if(ui.range)h+=`<rect data-mh="${i}" x="${x-14}" y="${Y(gh)-20}" width="28" height="${Y(low-0.12)-Y(gh)+20}" fill="transparent" style="cursor:pointer"/>`;
+    const inR=(ui.range&&(i===ui.range.i0||i===ui.range.i1))||(ui.pick&&ui.pick.first===i);
+    h+=`<rect data-mh="${i}" x="${x-14}" y="${Y(gh)-20}" width="28" height="${Y(low-0.12)-Y(gh)+20}" fill="transparent" style="cursor:${ui.pick||ui.range?'pointer':'default'}"/>`;
     const fx=res.flood&&res.flood.get(n);
     if(fx)h+=`<rect x="${x-MW/2-3}" y="${Y(gh+fx)}" width="${MW+6}" height="${Math.max(2,Y(gh)-Y(gh+fx))}" fill="var(--bad)" opacity=".5" pointer-events="none"/>`+
       `<text x="${x}" y="${Y(gh+fx)-4}" font-size="10" font-weight="700" text-anchor="middle" fill="var(--bad)" pointer-events="none">침수 +${fx.toFixed(2)}</text>`;
     h+=`<rect x="${x-MW/2}" y="${Y(gh)}" width="${MW}" height="${Y(low-0.12)-Y(gh)}" fill="${inR?'var(--accent-soft)':'var(--panel)'}" stroke="${fx?'var(--bad)':inR?'var(--accent)':'var(--ink)'}" stroke-width="${fx?2:inR?2:1.1}" pointer-events="none"/>`+
-       (x-lastName>=n.length*6.6+6||i===g.nodes.length-1&&x-lastName>20?`<text x="${x}" y="${Y(gh)-7}" font-size="10.5" font-weight="600" text-anchor="middle" fill="var(--ink)">${esc(n)}</text>`:'');
+       (x-lastName>=n.length*6.6+6||i===g.nodes.length-1&&x-lastName>20?`<text x="${x}" y="${Y(gh)-7}" font-size="10.5" font-weight="600" text-anchor="middle" fill="var(--ink)" pointer-events="none">${esc(n)}</text>`:'');
     if(x-lastName>=n.length*6.6+6)lastName=x;
   });
   // 일직선 구간 표시
@@ -1178,6 +1178,7 @@ function renderProfile(){
 const svgP=$('#prof');
 svgP.addEventListener('pointerdown',e=>{
   const m=e.target.closest('[data-mh]');
+  if(m&&(ui.pick||e.shiftKey)){e.preventDefault();pickTwo(+m.dataset.mh);return;}   // 구간 일직선: 맨홀 두 개 선택 (버튼 누른 뒤, 또는 Shift+클릭)
   if(m&&ui.range){e.preventDefault();pickRangeNode(+m.dataset.mh);return;}
   const t=e.target.closest('[data-pid]');if(!t)return;
   const pid=t.dataset.pid;
@@ -1215,6 +1216,7 @@ document.addEventListener('keydown',e=>{
     const textual=tag==='textarea'||(tag==='input'&&!/^(number|checkbox|radio|range|button)$/.test(e.target.type||''));
     if(!(mod&&!textual&&/^[zy]$/i.test(e.key)))return;
   }
+  if(!mod&&e.key==='Escape'&&ui.pick){ui.pick=null;render();toast('선택을 취소했습니다');return;}
   if(!mod&&e.key==='Escape'&&ui.big){setBig(false);return;}
   if(!mod&&(e.key==='f'||e.key==='F')){setBig(!ui.big);return;}
   if(!mod&&e.key==='Home'){e.preventDefault();$('#zFit').click();return;}
@@ -1875,7 +1877,7 @@ function pickRangeNode(k){
 }
 function dropRange(){if(ui.range){ui.range=null;toast('구간 일직선을 해제했습니다');}}
 function renderRangeBar(){
-  const bar=$('#rangeBar');bar.hidden=!ui.range;$('#bRange').classList.toggle('on',!!ui.range);
+  const bar=$('#rangeBar');bar.hidden=!ui.range;$('#bRange').classList.toggle('on',!!(ui.range||ui.pick));$('#profWrap').style.cursor=ui.pick?'crosshair':'';
   if(!ui.range)return;
   const g=routeGeom(),{i0,i1}=ui.range;
   const opt=(lo,hi,sel)=>g.nodes.map((n,i)=>i<lo||i>hi?'':`<option value="${i}"${i===sel?' selected':''}>${esc(n)}</option>`).join('');
@@ -1885,13 +1887,21 @@ function renderRangeBar(){
   const ng=seg.filter(p=>res.get(p.id).st===2).length,S=rangeSlope();
   $('#rInfo').innerHTML=`S <b style="color:${S<=0?'var(--bad)':'inherit'}">${S.toFixed(2)}‰</b> · 연장 ${seg.reduce((a,p)=>a+p.L,0).toFixed(1)} m · 최저유속 <b style="color:var(--${stCls(res.get(worst.id).st)})">${res.get(worst.id).V.toFixed(2)}</b> (${esc(worst.id)})`+(ng?` · <span class="remark bad">불량 ${ng}</span>`:'');
 }
+function pickTwo(k){
+  if(!ui.pick)ui.pick={first:null};
+  if(ui.pick.first==null){ui.pick.first=k;render();toast('시점 선택됨 - 이어서 종점 맨홀을 클릭하세요 (취소 Esc)');return;}
+  const i0=Math.min(ui.pick.first,k),i1=Math.max(ui.pick.first,k);
+  if(i1-i0<2){ui.pick.first=k;render();toast('두 맨홀 사이에 관로가 2개 이상 있어야 합니다. 다시 종점을 고르세요');return;}
+  ui.pick=null;setRange(i0,i1,0);
+  toast(`${routeGeom().nodes[i0]} → ${routeGeom().nodes[i1]} 일직선으로 정리했습니다 (되돌리기 Ctrl+Z)`);
+}
 $('#bRange').onclick=()=>{
+  if(ui.pick){ui.pick=null;render();toast('선택을 취소했습니다');return;}
   if(ui.range){ui.range=null;render();return;}
-  const ch=routes.get(ui.route),k=Math.max(0,ch.findIndex(p=>p.id===ui.sel));
-  const i0=Math.min(k,ch.length-2<0?0:ch.length-2);setRange(i0,Math.min(ch.length,i0+2),0);
-  toast('시점·종점 맨홀을 골라 구간을 넓히세요 · 되돌리기 가능');
+  ui.pick={first:null};render();
+  toast('일직선으로 만들 시작·끝 맨홀을 차례로 클릭(탭)하세요');
 };
-$('#rOff').onclick=()=>{ui.range=null;render();};
+$('#rOff').onclick=()=>{ui.range=null;ui.pick=null;render();};
 
 /* ---------- CAD식 보기 조작 ----------
    휠 = 커서 기준 확대·축소 (H:V 비율 고정), 휠 버튼 또는 Space+드래그 = 이동, Home = 전체, F = 크게 보기 */
