@@ -814,6 +814,8 @@ PT.obsTable=(route,chainInt)=>{
   return rows;
 };
 // 종단파일이 없는 노선은 새로 만든다 (맨홀 + chain 간격 측점)
+PT.defCode='OP02';
+PT.defSlope=()=>typeof XS!=='undefined'?XS.slope:0.5;
 PT.newProfile=(route,line,chainInt=20)=>{
   const optN=['','HScale','Vscale','chain','시작지반','Type','종단분할','라인명','관종','맨홀INV'];
   const optV=['',500,100,chainInt,'','A','',line,route[0]?.ptype||'',0];
@@ -829,7 +831,8 @@ PT.newProfile=(route,line,chainInt=20)=>{
       const f=t.c/p.L,gh=p.ghUp+(p.ghDn-p.ghUp)*f,z=p.invUp+(p.invDn-p.invUp)*f;
       const hasXY=isFinite(p.x1)&&(p.x1||p.y1);
       const r=[t.mh?'P':'',+(ch0+t.c).toFixed(3),+gh.toFixed(3),+z.toFixed(3),p.D,t.mh||''];
-      r[8]=p.code||'';
+      r[8]=p.code||PT.defCode;   // 구간(공법 코드)이 비면 PipeTools 가 터파기 선·횡단을 만들지 못함 → 기본 OP02(OPEN CUT, ASP)
+      r[9]=/^OP/i.test(r[8])?PT.defSlope():'';   // 구배(터파기 오픈컷 1:n)
       r[24]=hasXY?+(p.x1+(p.x2-p.x1)*f).toFixed(4):'';r[25]=hasXY?+(p.y1+(p.y2-p.y1)*f).toFixed(4):'';
       r[42]=staName(ch0+t.c);r[43]=+gh.toFixed(3);r[44]=t.mh||'';
       rows.push(r);
@@ -848,6 +851,7 @@ PT.exportHyd=(pipes,head)=>{
       if(typeof v==='number'){if(!(isFinite(PT.num(r[i]))&&Math.abs(PT.num(r[i])-v)<0.0005))r[i]=+v.toFixed(3);}else r[i]=v;});
     // 수리시트 AA(구간) = "공법코드,연장"
     const ai=COLS.indexOf('sect');if(p.code&&String(r[ai]).split(',')[0].trim()!==p.code)r[ai]=`${p.code},${+(+p.L).toFixed(3)}`;
+    else if(!p.code&&!String(r[ai]??'').trim())r[ai]=`${PT.defCode},${+(+p.L).toFixed(3)}`;   // 공법이 비어 있으면 기본 OPEN CUT 코드
     return r;
   }));
 };
