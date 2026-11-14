@@ -269,7 +269,7 @@ button,.tab{touch-action:manipulation}
           <label for="cVmax">최대유속 (m/s)</label><input id="cVmax" type="number" step="0.1" value="3.0">
           <label for="cVlow">유지관리 하한 유속 (m/s)</label><input id="cVlow" type="number" step="0.05" value="0.3">
           <label for="cCover">최소토피 (m)</label><input id="cCover" type="number" step="0.1" value="1.0">
-          <label for="cCoverB">암거 최소토피 (m)</label><input id="cCoverB" type="number" step="0.1" value="0.7">
+          <label for="cCoverB">암거 최소토피 (m)</label><input id="cCoverB" type="number" step="0.1" value="1.0">
           <label for="cAllowC">허용 수심비 · 원형</label><input id="cAllowC" type="number" step="0.05" value="1.0">
           <label for="cAllowB">허용 수심비 · 암거</label><input id="cAllowB" type="number" step="0.05" value="0.9">
           <label for="cCovMode">토피 검토 위치</label><select id="cCovMode"><option value="pt">상류단</option><option value="all">전 측점</option></select>
@@ -868,7 +868,7 @@ PT.exportHyd=(pipes,head)=>{
 const $=s=>document.querySelector(s);
 const NS='http://www.w3.org/2000/svg';
 const clone=o=>JSON.parse(JSON.stringify(o));
-const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,coverBox:0.7,clear:0.3,coverMode:'pt',allowCirc:1.0,allowBox:0.9};
+const crit={vmin:0.6,vmax:3.0,vlow:0.3,cover:1.0,coverBox:1.0,clear:0.3,coverMode:'pt',allowCirc:1.0,allowBox:0.9};
 const doc={profiles:new Map(),hydHead:null,file:'',base:new Map(),rpt:new Map(),rain:null};
 // 불러온 시점 값 (변경 추적용)
 const BASE_KEYS=['invUp','invDn','ghUp','ghDn','D','W','code'];
