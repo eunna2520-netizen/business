@@ -441,8 +441,9 @@ function critDepth(p,q){
 function gvfPipe(p,q,n,yDn,yn,yc,N=20){
   const L=p.L,S0=(p.invUp-p.invDn)/L,dx=L/N,z=x=>p.invUp-S0*x,pts=[{x:L,y:yDn}];
   const steep=S0>0&&yn<yc&&q>0;
-  if(steep){   // 사류: 상류 지배 → 등류수심, 하류 배수위가 더 높으면 그 수평 수위
-    const Hd=p.invDn+yDn;for(let i=1;i<=N;i++){const x=L-i*dx;pts.push({x,y:Math.max(yn,Hd-z(x))});}
+  if(steep){   // 사류: 상류 지배 → 등류수심, 하류 배수위가 더 높으면 그 수위(하류단이 가득 찼으면 가득 찬 관의 마찰경사만큼 상류로 올라감)
+    const Dh=secH(p),Sfull=yDn>=Dh-1e-6?frictionS(p,q,Dh*2,n):0;
+    const Hd=p.invDn+yDn;for(let i=1;i<=N;i++){const x=L-i*dx;pts.push({x,y:Math.max(yn,Hd+Sfull*(L-x)-z(x))});}
     return pts.reverse();
   }
   let y=yDn;
@@ -478,6 +479,10 @@ function gvfNetwork(pipes,out,crit){
     if(Hup>p.ghUp+0.001){label=`OVERFLOW(+${(Hup-p.ghUp).toFixed(2)})`;gst=2;}
     else if(yUp>=D-1e-6){label='UP-FULL';gst=2;}
     else if(fullLen>0.01){label=`UP-INSIDE(x:${fullLen.toFixed(2)})`;gst=2;}
+    else if(!isPump(p)){   // PipeTools 처럼: 부등류 최대 수심비가 허용 수심비(BOX 0.9, 원형 1.0)를 넘으면 여유율 NG
+      const ymax=Math.max(...pts.map(t=>t.y)),allow=isBox(p)?(crit.allowBox??0.9):(crit.allowCirc??1.0);
+      if(ymax/D>allow+1e-6){label=`DEPTH${Math.round(ymax/D*100)}%`;gst=2;}
+    }
     const V=pts.map(t=>q/geomAt(p,Math.min(t.y,D*2)).A);
     r.g={pts,yUp,yDn,Hup,Hdn,yc,yn,fullLen,label,Vup:V[0],Vdn:V[V.length-1]};
     // 침수 맨홀: 맨홀 수위(= 상류단 수위, 방류구는 하류단 수위)가 지반고를 넘으면
