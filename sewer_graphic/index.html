@@ -598,8 +598,26 @@ function compute(pipes,crit,rain=null){
     if(p.invDn<lowOut-0.0005){const r=out.get(p.id);r.joint=lowOut-p.invDn;r.rem.push('JOINT-'+r.joint.toFixed(2));r.st=2;}
   });
   if(crit.gvf)gvfNetwork(pipes,out,crit);
+  else diagnoseGvf(pipes,out,byUp);
   pipes.forEach(p=>{const r=out.get(p.id);if(!r.rem.length)r.rem.push('GOOD');});
   return out;
+}
+// 부등류 확인 필요 진단 (등류로 계산했을 때만): 하류 영향을 받을 가능성이 있는 관로를 사유와 함께 표시
+function diagnoseGvf(pipes,out,byUp){
+  const hint=(p,t)=>{const r=out.get(p.id);(r.gvfHint=r.gvfHint||[]).push(t);};
+  const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
+  // 1) 방류구 외수위(비고 FIXED=): 외수위가 하류단 등류 수위보다 높으면 수평 수위로 상류까지 영향
+  const back=(p,H)=>{const r=out.get(p.id);if(!(H>p.invDn+r.h+0.001))return;hint(p,`외수위 ${H.toFixed(2)} m가 등류 수위(${(p.invDn+r.h).toFixed(2)})보다 높음`);(byDn.get(p.up)||[]).forEach(q=>back(q,H));};
+  pipes.filter(p=>!(byUp.get(p.dn)||[]).length).forEach(p=>{const m=/FIXED\s*=\s*(-?[\d.]+)/i.exec(String(p.note||''));if(m)back(p,+m[1]);});
+  pipes.forEach(p=>{
+    const r=out.get(p.id);if(r.pump||!(r.Q>0))return;
+    // 2) 만관에 가까움: 수심비 80% 이상(또는 만관)이면 하류 수위 변화에 민감
+    if(r.sur||r.hD>=0.8)hint(p,`수심비 ${(r.hD*100).toFixed(0)}%${r.sur?' (만관)':''} — 만관에 근접`);
+    // 3) 완만한 경사에서 수심이 깊음
+    else if(r.S<=3&&r.hD>=0.6)hint(p,`경사 ${r.S.toFixed(1)}‰ 완만 + 수심비 ${(r.hD*100).toFixed(0)}%`);
+    // 4) 병목: 하류 관 통수능이 80% 이상 사용
+    (byUp.get(p.dn)||[]).forEach(d=>{const rd=out.get(d.id);if(rd&&!rd.pump&&rd.use>=0.8&&r.hD>=0.5)hint(p,`하류 ${d.id} 통수능 사용률 ${(rd.use*100).toFixed(0)}%`);});
+  });
 }
 function slopeForV(p,Q,target){
   const nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
@@ -924,15 +942,15 @@ function renderSummary(){
     `<span class="chip good">적합 ${c[0]}</span><span class="chip warn">주의 ${c[1]}</span><span class="chip bad">불량 ${c[2]}</span>`+
     (()=>{const nc=[...res.values()].filter(r=>r.coverNG).length,no=[...res.values()].filter(r=>r.obsHits.length).length;
       const nch=pipes.filter(p=>changedKeys(p).length).length;
-      const nf=res.flood?res.flood.size:0;
-      return (nch?`<button class="chip chg" id="chgChip" title="불러온 값과 달라진 관로">변경 ${nch}</button>`:'')+(nf?`<span class="chip bad" title="부등류 수위가 지반고를 넘는 맨홀">침수 맨홀 ${nf}</span>`:'')+(nc?`<span class="chip flag">토피 부족 ${nc}</span>`:'')+(no?`<span class="chip flag">지장물 근접 ${no}</span>`:'');})();
+      const nf=res.flood?res.flood.size:0,ng=[...res.values()].filter(r=>r.gvfHint&&r.gvfHint.length).length;
+      return (nch?`<button class="chip chg" id="chgChip" title="불러온 값과 달라진 관로">변경 ${nch}</button>`:'')+(nf?`<span class="chip bad" title="부등류 수위가 지반고를 넘는 맨홀">침수 맨홀 ${nf}</span>`:'')+(ng&&!crit.gvf?`<button class="chip flag" id="gvfChip" title="하류 수위 영향이 있을 수 있는 관로 — 누르면 부등류로 계산">부등류 확인 ${ng}</button>`:'')+(nc?`<span class="chip flag">토피 부족 ${nc}</span>`:'')+(no?`<span class="chip flag">지장물 근접 ${no}</span>`:'');})();
 }
 function renderTabs(){
   $('#tabs').innerHTML=[...routes.keys()].map(k=>{
     const worst=Math.max(...routes.get(k).map(p=>res.get(p.id).st));
     return `<button class="tab${k===ui.route?' on':''}" data-r="${esc(k)}"><span style="color:var(--${stCls(worst)})">●</span> ${esc(k)}</button>`;}).join('');
 }
-$('#summary').addEventListener('click',e=>{if(e.target.closest('#cmpChip')){ui.cmp=!ui.cmp;render();return;}if(!e.target.closest('#chgChip'))return;
+$('#summary').addEventListener('click',e=>{if(e.target.closest('#cmpChip')){ui.cmp=!ui.cmp;render();return;}if(e.target.closest('#gvfChip')){setGvf(true);return;}if(!e.target.closest('#chgChip'))return;
   $('#dlg').hidden=false;$('#pasteBox').value=changeList().join('\n');$('#pasteErr').textContent='불러온 값과 달라진 항목 (종단파일·수리시트 복사 시 이 값들이 반영됩니다)';});
 $('#tabs').addEventListener('click',e=>{const b=e.target.closest('[data-r]');if(!b)return;selectRoute(b.dataset.r);});
 function selectRoute(r,pid){if(r!==ui.route){ui.range=null;ui.pick=null;ui.hz=null;}ui.route=r;ui.yFrame=null;ui.yManual=false;const ch=routes.get(r);ui.sel=pid||ch[0].id;ui.handle={pid:ui.sel,end:'dn'};render();scrollToHandle();}
@@ -1303,6 +1321,7 @@ function renderSection(){
     ['실유속'+(r.g?' (등류)':''),r.V.toFixed(2)+' m/s'],
     ['토피 상/하',f2(r.covUp)+' / '+f2(r.covDn)+' m'],
     ...(()=>{const t=doc.rpt.get(p.id);return t?[['PipeTools 실유속',`${t.V.toFixed(3)} <span style="color:var(--muted)">(차 ${(r.V-t.V>=0?'+':'')+(r.V-t.V).toFixed(3)})</span>`],['PipeTools 판정',`${esc(t.ckM)} · ${esc(t.ckV)} · ${esc(t.ckC)}`]]:[];})(),
+    ...(r.gvfHint&&r.gvfHint.length&&!r.g?[['부등류 확인 필요',`<span class="remark bad">${r.gvfHint.map(esc).join('<br>')}</span>`]]:[]),
     ...(r.g?[['부등류 수위 상/하',`${f2(r.g.Hup)} / ${f2(r.g.Hdn)} m`],['부등류 수심 상/하',`${r.g.yUp.toFixed(3)} / ${r.g.yDn.toFixed(3)} m`],['부등류 유속 상/하',`${r.g.Vup.toFixed(2)} / ${r.g.Vdn.toFixed(2)} m/s`],['한계수심 / 등류수심',`${r.g.yc.toFixed(3)} / ${r.g.yn.toFixed(3)} m`],['부등류 판정',`<span class="remark ${r.g.label==='GOOD'?'good':'bad'}">${esc(r.g.label)}</span>`]]:[]),
     ['판정',r.rem.map(x=>`<span class="remark ${stCls(r.st)}">${esc(x)}</span>`).join(' ')],
     ['토피 검토',r.coverNG?`<span class="flagtxt">부적합 ${f2(r.cminU)} m</span>`:r.coverProt?`<span class="remark">관보호공 구간 ${f2(r.cmin)} m</span>`:`<span class="remark good">적합</span>`],
