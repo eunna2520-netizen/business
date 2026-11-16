@@ -59,7 +59,7 @@ th.cmp,td.cmp{background:var(--panel2)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
 .xsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.xscell{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel2);min-width:0}.xshead{font-size:12px;margin-bottom:2px}svg.xs{width:100%;height:auto;display:block}.xst{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}.xst th,.xst td{border:1px solid var(--line);padding:1px 6px}.xst th{font-weight:400;color:var(--muted);text-align:left;width:46%}.xst td{text-align:right}.xsopt{margin-bottom:8px}.xsopt summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.xsparams{display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0;font-size:12px}.xsparams input{width:58px}
 .card.big{position:fixed;inset:0;z-index:60;margin:0;border-radius:0;overflow:auto;border:0}body.bigOn{overflow:hidden}#profWrap.panning,#profWrap.spacePan{cursor:grab}#profWrap.panning{cursor:grabbing}
-.tolgrid{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:8px 2px}.tolgrid b{flex-basis:100%;font-size:12px;color:var(--muted)}.tolgrid input[type=number]{width:64px}.tol>summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+.tolgrid{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:8px 2px}.tolgrid b{flex-basis:100%;font-size:12px;color:var(--muted)}.tolgrid input[type=number]{width:64px}.tol>summary{display:inline-block;cursor:pointer;list-style:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 12px;font-size:13px;font-weight:600;user-select:none}.tol>summary::-webkit-details-marker{display:none}.tol>summary::after{content:" ▾"}.tol[open]>summary{background:var(--accent-soft)}.tol[open]>summary::after{content:" ▴"}.tol[open]{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
 .menu{position:relative;display:inline-block}
 .menu>summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:var(--panel);white-space:nowrap;user-select:none}
 .menu>summary::-webkit-details-marker{display:none}
@@ -214,7 +214,7 @@ button,.tab{touch-action:manipulation}
 
   <div class="dlg" id="autoDlg" hidden>
     <div class="bar"><strong>통수능 자동 조정 (관경 상향)</strong><span class="sub">통수능(여유율)이 부족한 관로의 관경을 규격 목록에서 한 단계씩 키웁니다. 관경은 줄이지 않고, 상류 관경이 하류보다 크지 않도록 하류도 같이 키웁니다. <b>관저고는 그대로</b> 두므로 관경이 커지면 토피가 줄 수 있습니다(토피·유속은 다음 단계에서 조정).</span></div>
-    <div class="tolslot"><details class="tol" id="tolBox"><summary>허용 여유값 설정</summary><div class="tolgrid">
+    <div class="tolslot"><details class="tol" id="tolBox"><summary>⚙ 허용 여유값 설정</summary><div class="tolgrid">
       <b>유속</b>
       <label>허용 하한 유속 <input id="aVlow" type="number" step="0.05"> m/s</label>
       <label title="하한 유속을 맞출 때 하한에 더하는 여유">하한 위 여유 <input id="aVmar" type="number" step="0.01" value="0.01"> m/s</label>
@@ -257,7 +257,7 @@ button,.tab{touch-action:manipulation}
   </div>
 
   <div class="dlg" id="allDlg" hidden>
-    <div class="bar"><strong>전체 자동 조정</strong><span class="sub">우선순위 <b>역구배 &gt; 통수능 &gt; 유속 &gt; 토피 &gt; 지장물</b> 순서로 관경과 관저고를 함께 조정합니다. 통수능 부족은 관경 상향, 유속은 구배(관저고)와 맨홀 단차, 구배로 못 잡는 최대유속 초과는 관경을 더 키워 다시 계산, 토피 부족은 관보호공(-B), 못 피한 지장물은 무시하고 표시합니다. 세부 옵션은 각 단계 대화상자의 값을 씁니다.</span></div>
+    <div class="bar"><strong>전체 자동 조정</strong><span class="sub">우선순위 <b>역구배 &gt; 통수능 &gt; 유속 &gt; 토피 &gt; 지장물</b> 순서로 관경과 관저고를 함께 조정합니다. 통수능 부족은 관경 상향, 유속은 구배(관저고)와 맨홀 단차, 구배로 못 잡는 최대유속 초과는 관경을 더 키워 다시 계산, 토피 부족은 관보호공(-B), 못 피한 지장물은 무시하고 표시합니다. 허용 한도(하한 유속, 최소 토피, 이격 부족분 등)는 아래 <b>⚙ 허용 여유값 설정</b>에서 직접 바꿀 수 있습니다.</span></div>
     <div class="hint">세부 단계만 따로 실행: <button id="bAuto">통수능(관경)</button> <button id="bAuto2">유속·구배</button> <button id="bAuto3">토피·지장물</button></div>
     <div class="hint"><label title="유출관 상류 관저를 유입관 하류 관저와 같게 맞춤(관저접합). 유속 초과는 구배 완화 대신 관경 상향으로 해결, 단차를 없애면 토피가 줄어 보호공이 늘 수 있음"><input id="aNoDrop" type="checkbox"> 맨홀 단차 없애기 (관저접합)</label></div>
     <div class="tolslot"></div>
