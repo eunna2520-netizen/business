@@ -303,7 +303,7 @@ button,.tab{touch-action:manipulation}
           <div class="hint" style="flex-basis:100%">시점·종점 관저를 끌면 사이 맨홀이 모두 한 경사로 따라옵니다. 구간 안 관 몸통을 끌면 구간 전체가 평행이동합니다. 종단의 맨홀을 눌러 시점·종점을 바꿀 수도 있습니다.</div>
         </div>
         <div class="scroll" id="profWrap"><svg id="prof" aria-label="종단면도"></svg></div>
-        <div class="hint" style="padding:4px 2px 0">종단도 아래 표의 <b>지반고 · 관저고 · 토피 · 경사</b> 값을 누르면 그 자리에서 바로 고칠 수 있습니다 (Enter 확정 · Esc 취소 · 맨홀 연동/끝점 단독 설정 따름)</div>
+        <div class="hint" style="padding:4px 2px 0">종단도 아래 표의 <b>지반고 · 관저고 · 토피 · 경사</b> 값을 누르면 그 자리에서 바로 고칠 수 있습니다 (<kbd>↑</kbd><kbd>↓</kbd> ±0.01 (경사 ±0.1) · <kbd>Shift</kbd> 10배 · <kbd>←</kbd><kbd>→</kbd> 옆 칸 · Enter 확정 · Esc 닫기 · 맨홀 연동/끝점 단독 설정 따름)</div>
       </div>
       <div class="card plan-card">
         <div class="card-h"><h2 id="planTitle">관망 평면 (모식도)</h2><div class="sp"></div>
@@ -2188,27 +2188,54 @@ function renderTable(){
 /* ---------- 종단 하단 표 직접 수정 (지반고·관저고·토피·경사) ---------- */
 let cellEd=null;
 function closeCellEd(){if(cellEd){const e=cellEd;cellEd=null;e.remove();}}
-$('#prof').addEventListener('click',e=>{
-  const t=e.target.closest('text[data-ek]');if(!t||drag)return;
-  const ch=routes.get(ui.route)||[],i=+t.dataset.ei,k=t.dataset.ek,pin=ch[i-1],pout=ch[i];
+// 종단 하단 표 한 칸의 값을 적용 (지반고·관저고 유입/유출·토피·경사)
+function applyCell(k,i,v){
+  const ch=routes.get(ui.route)||[],pin=ch[i-1],pout=ch[i];
+  edit(()=>{
+    if(k==='gh'){if(pout)pout.ghUp=v;if(pin)pin.ghDn=v;}
+    else if(k==='invDn'&&pin)shiftEnd(pin.id,'dn',r3(v-pin.invDn),ui.linked);
+    else if(k==='invUp'&&pout)shiftEnd(pout.id,'up',r3(v-pout.invUp),ui.linked);
+    else if(k==='cov'){const gh=pout?pout.ghUp:pin.ghDn;if(pout)shiftEnd(pout.id,'up',r3(gh-v-secH(pout)-pout.invUp),ui.linked);else shiftEnd(pin.id,'dn',r3(gh-v-secH(pin)-pin.invDn),ui.linked);}
+    else if(k==='S'&&pout){const nd=r3(pout.invUp-v/1000*pout.L);shiftEnd(pout.id,'dn',r3(nd-pout.invDn),ui.linked);}
+  });
+}
+// 입력칸 열기. 화살표: ↑↓ 값 증감(바로 적용, Shift 10배), ←→ / Tab 옆 칸으로 이동
+function openCellEd(k,i){
+  const t=document.querySelector(`#prof text[data-ek="${k}"][data-ei="${i}"]`);if(!t)return false;
   const wrap=$('#profWrap'),wr=wrap.getBoundingClientRect(),tr=t.getBoundingClientRect();
   closeCellEd();
   const inp=document.createElement('input');inp.className='cellEd';inp.type='text';inp.inputMode='decimal';inp.value=t.textContent.trim();
   inp.style.left=(tr.left-wr.left+wrap.scrollLeft+tr.width/2-32)+'px';inp.style.top=(tr.top-wr.top+wrap.scrollTop-3)+'px';
   wrap.appendChild(inp);cellEd=inp;inp.focus();inp.select();
-  const commit=()=>{
-    if(cellEd!==inp)return;const raw=inp.value.trim();closeCellEd();
-    const v=parseFloat(raw);if(!isFinite(v)||raw===t.textContent.trim())return;
-    edit(()=>{
-      if(k==='gh'){if(pout)pout.ghUp=v;if(pin)pin.ghDn=v;}
-      else if(k==='invDn'&&pin)shiftEnd(pin.id,'dn',r3(v-pin.invDn),ui.linked);
-      else if(k==='invUp'&&pout)shiftEnd(pout.id,'up',r3(v-pout.invUp),ui.linked);
-      else if(k==='cov'){const gh=pout?pout.ghUp:pin.ghDn;if(pout)shiftEnd(pout.id,'up',r3(gh-v-secH(pout)-pout.invUp),ui.linked);else shiftEnd(pin.id,'dn',r3(gh-v-secH(pin)-pin.invDn),ui.linked);}
-      else if(k==='S'&&pout){const nd=r3(pout.invUp-v/1000*pout.L);shiftEnd(pout.id,'dn',r3(nd-pout.invDn),ui.linked);}
-    });
+  const orig=inp.value,dec=k==='S'?2:2;
+  const commit=(keepOpen)=>{   // 값이 바뀌었으면 적용
+    if(cellEd!==inp)return false;const raw=inp.value.trim();closeCellEd();
+    const v=parseFloat(raw);if(!isFinite(v)||raw===orig)return false;applyCell(k,i,v);return true;
   };
-  inp.addEventListener('keydown',ev=>{if(ev.key==='Enter'){ev.preventDefault();commit();}else if(ev.key==='Escape'){ev.preventDefault();closeCellEd();}ev.stopPropagation();});
-  inp.addEventListener('blur',commit);
+  const near=dir=>{   // 같은 줄에서 옆 칸 찾기
+    const all=[...document.querySelectorAll(`#prof text[data-ek="${k}"]`)].map(e=>+e.dataset.ei).sort((a,b)=>a-b);
+    return dir>0?all.find(n=>n>i):[...all].reverse().find(n=>n<i);
+  };
+  inp.addEventListener('keydown',ev=>{
+    ev.stopPropagation();
+    if(ev.key==='Enter'){ev.preventDefault();commit();}
+    else if(ev.key==='Escape'){ev.preventDefault();closeCellEd();}
+    else if(ev.key==='ArrowUp'||ev.key==='ArrowDown'){
+      ev.preventDefault();const cur=parseFloat(inp.value);if(!isFinite(cur))return;
+      const step=(k==='S'?0.1:0.01)*(ev.shiftKey?10:1),nv=+(cur+(ev.key==='ArrowUp'?step:-step)).toFixed(dec);
+      applyCell(k,i,nv);cellEd=null;inp.remove();requestAnimationFrame(()=>openCellEd(k,i));
+    }
+    else if(ev.key==='ArrowLeft'||ev.key==='ArrowRight'||ev.key==='Tab'){
+      const dir=ev.key==='ArrowLeft'||(ev.key==='Tab'&&ev.shiftKey)?-1:1,n=near(dir);if(n==null)return;
+      ev.preventDefault();commit();requestAnimationFrame(()=>openCellEd(k,n));
+    }
+  });
+  inp.addEventListener('blur',()=>commit());
+  return true;
+}
+$('#prof').addEventListener('click',e=>{
+  const t=e.target.closest('text[data-ek]');if(!t||drag)return;
+  openCellEd(t.dataset.ek,+t.dataset.ei);
 });
 const tblChange=e=>{
   const el=e.target,k=el.dataset.k,p=P(el.dataset.pid);if(!k||!p)return;
