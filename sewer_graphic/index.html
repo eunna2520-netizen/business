@@ -1644,6 +1644,7 @@ $('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;
   p.D=orig;if(pick===orig){toast('현재 관경이 최소 적합 관경입니다');return;}
   edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
 
+const showDlg=sel=>{try{$(sel).scrollIntoView({block:'start',behavior:'smooth'});}catch(e){}};
 /* ---------- 통수능 자동 조정 ---------- */
 let autoPlan=null;
 const secStr=(b,v)=>b?`□${(+v.W).toFixed(2)}×${(+v.D).toFixed(2)}`:`D${v.D}`;
@@ -1655,7 +1656,7 @@ function runAuto(){
     (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>현재</th><th></th><th>제안</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다.</div>')+stuck;
   $('#bAutoApply').disabled=!a.changes.length;
 }
-$('#bAuto').onclick=()=>{$('#catCirc').value=catalog.circ.join(', ');$('#catBox').value=catalog.box.map(([w,h])=>`${w}x${h}`).join(', ');runAuto();$('#autoDlg').hidden=false;};
+$('#bAuto').onclick=()=>{$('#catCirc').value=catalog.circ.join(', ');$('#catBox').value=catalog.box.map(([w,h])=>`${w}x${h}`).join(', ');runAuto();$('#autoDlg').hidden=false;showDlg('#autoDlg');};
 $('#bAutoRun').onclick=()=>{const c=parseNumList($('#catCirc').value),b=parseBoxList($('#catBox').value);if(c.length)catalog.circ=c;if(b.length)catalog.box=b;runAuto();};
 $('#bAutoClose').onclick=()=>{$('#autoDlg').hidden=true;};
 $('#bAutoApply').onclick=()=>{if(!autoPlan||!autoPlan.changes.length)return;const ch=autoPlan.changes;
@@ -1673,7 +1674,7 @@ function runSlope(){
     (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>상류 관저</th><th>하류 관저</th><th>경사‰</th><th>유속</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다.</div>')+(a.remain.length?`<div class="hint" style="margin-top:6px">⚠ 조정 후에도 남는 관로 ${a.remain.length}개 — 통수능·최대유속·최소토피 조건이 서로 맞지 않는 경우입니다(관경·단차 구조 검토 필요): ${a.remain.map(r=>esc(r.id)+' ('+esc(r.txt)+')').join(', ')}</div>`:'');
   $('#bSlopeApply').disabled=!a.changes.length;
 }
-$('#bAuto2').onclick=()=>{const storm=!!(doc.rain&&doc.rain.type1>1);$('#aVlow').value=storm?0.6:crit.vlow;runSlope();$('#slopeDlg').hidden=false;};
+$('#bAuto2').onclick=()=>{const storm=!!(doc.rain&&doc.rain.type1>1);$('#aVlow').value=storm?0.6:crit.vlow;runSlope();$('#slopeDlg').hidden=false;showDlg('#slopeDlg');};
 $('#bSlopeRun').onclick=runSlope;
 $('#bSlopeClose').onclick=()=>{$('#slopeDlg').hidden=true;};
 $('#bSlopeApply').onclick=()=>{if(!slopePlan||!slopePlan.changes.length)return;const ch=slopePlan.changes;
@@ -1691,7 +1692,7 @@ function runCover(){
     (a.ignored.length?`<div class="hint" style="margin-top:6px">⚠ 지장물을 피하지 못해 <b>무시한</b> 관로 ${a.ignored.length}개 (지장물 이설 또는 구조 검토): ${a.ignored.map(r=>esc(r.id)+' ('+esc(r.txt)+')').join(', ')}</div>`:'');
   $('#bCoverApply').disabled=!a.changes.length;
 }
-$('#bAuto3').onclick=()=>{runCover();$('#coverDlg').hidden=false;};
+$('#bAuto3').onclick=()=>{runCover();$('#coverDlg').hidden=false;showDlg('#coverDlg');};
 $('#bCoverRun').onclick=runCover;
 $('#bCoverClose').onclick=()=>{$('#coverDlg').hidden=true;};
 $('#bCoverApply').onclick=()=>{if(!coverPlan||!coverPlan.changes.length)return;const ch=coverPlan.changes;
@@ -1714,7 +1715,7 @@ function runAll(){
     (a.remain.length?`<div class="hint" style="margin-top:6px">⚠ 조정 후에도 남는 항목 ${a.remain.length}개 관로: ${a.remain.map(r=>'<br>'+esc(r.id)+' — '+esc(r.txt)).join('')}</div>`:'');
   $('#bAllApply').disabled=!a.changes.length;
 }
-$('#bAutoAll').onclick=()=>{runAll();$('#allDlg').hidden=false;};
+$('#bAutoAll').onclick=()=>{runAll();$('#allDlg').hidden=false;showDlg('#allDlg');};
 $('#bAllRun').onclick=runAll;$('#aNoDrop').onchange=runAll;
 $('#bAllClose').onclick=()=>{$('#allDlg').hidden=true;};
 $('#bAllApply').onclick=()=>{if(!allPlan||!allPlan.changes.length)return;const ch=allPlan.changes;
