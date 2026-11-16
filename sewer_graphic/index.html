@@ -215,6 +215,17 @@ button,.tab{touch-action:manipulation}
     <div class="btns"><button id="bSlopeRun">다시 계산</button><button id="bSlopeApply" class="on">적용</button><button id="bSlopeClose">닫기</button></div>
   </div>
 
+  <div class="dlg" id="coverDlg" hidden>
+    <div class="bar"><strong>토피·지장물·접합 자동 조정</strong><span class="sub">관을 경사 그대로 평행하게 내려(유속·통수능은 그대로) 접합 역류를 정리하고, 최소 토피(0.4 m)와 지장물 이격을 확보합니다. 토피가 기준(1.0 m)에 못 미치면 기본은 <b>관보호공(-B)</b>으로 처리하고, 지장물을 못 피하면 무시하되 목록에 표시합니다.</span></div>
+    <div class="hint" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <label>반드시 확보할 최소 토피 <input id="cHard" type="number" step="0.1" value="0.4" style="width:62px"> m</label>
+      <label title="기준 토피(1.0 m)를 맞추려고 관로당 더 팔 수 있는 깊이. 0이면 보호공으로만 처리">토피 확보용 추가 굴착 <input id="cDeep" type="number" step="0.1" value="0" style="width:62px"> m</label>
+      <label title="지장물을 피하려고 관로당 더 팔 수 있는 깊이">지장물 회피용 추가 굴착 <input id="cObs" type="number" step="0.1" value="0.5" style="width:62px"> m</label>
+    </div>
+    <div id="coverBody" style="max-height:320px;overflow:auto"></div>
+    <div class="btns"><button id="bCoverRun">다시 계산</button><button id="bCoverApply" class="on">적용</button><button id="bCoverClose">닫기</button></div>
+  </div>
+
   <div class="grid">
     <div class="col">
       <div class="card plan-card">
@@ -228,6 +239,7 @@ button,.tab{touch-action:manipulation}
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
+          <button id="bAuto3" title="접합 정리, 최소 토피 확보, 지장물 회피, 토피 부족 시 관보호공 처리 제안 (적용 전에 미리보기)">토피·지장물 자동 조정</button>
           <button id="bAuto2" title="역구배·유속 부족/초과 관로의 관저고(구배)를 자동 조정하는 제안 (적용 전에 미리보기)">유속·구배 자동 조정</button>
           <button id="bAuto" title="통수능이 부족한 관로의 관경을 규격 목록에서 자동으로 키우는 제안 (적용 전에 미리보기)">통수능 자동 조정</button>
           <button id="bRange" title="누른 뒤 종단에서 시작·끝 맨홀 두 개를 클릭(탭)하면 그 사이 관저를 한 경사로 일직선 정리. 데스크톱은 Shift+클릭 두 번도 가능">구간 일직선</button>
@@ -691,6 +703,30 @@ function autoUpsize(pipes,crit,rain,cat){
   return{changes,ngNow,stuck:[...stuck].filter(([id])=>ngNow.includes(id)||true),iter:it,coverBefore:pipes.filter(p=>before.get(p.id).coverNG).length,coverAfter:coverNow,ngBefore:pipes.filter(p=>{const r=before.get(p.id);return !r.pump&&r.Q>0&&!r.marginOK;}).length};
 }
 
+// 관 하나의 하류 관저를 현재 상류 관저 기준으로 다시 정함 (역구배 > 통수능 > 유속). 바뀌면 사유 문자열, 아니면 ''
+function fitInvDn(p,r,crit,opt,vmin,vmax,vlow,o){
+  const L=p.L,nb=Math.max(1,+p.nb||1),n=+p.n||0.013,Q=r.Q,S0=(p.invUp-p.invDn)/L;
+  const vOf=S=>Q>0?flowSec(p,Q/nb,S,n).V:flowSec(p,0,S,n).Vfull;
+  const slopeFor=t=>{let lo=1e-5,hi=0.5;if(vOf(hi)<t)return hi;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(vOf(m)<t)lo=m;else hi=m;}return hi;};
+  let Scap=1e-4;
+  if(Q>0){const cap=S=>{const c=Object.assign({},p,{invDn:p.invUp-S*L});const u=hydOf(c,Q);return allowAt(c,S,n,u).Q*nb;};
+    const need=Q*(1+(r.margin||0));if(cap(0.5)>=need){let lo=1e-5,hi=0.5;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(cap(m)<need)lo=m;else hi=m;}Scap=Math.max(Scap,hi);}}
+  const vCur=S0>0?vOf(S0):0,cascade=(o.u-o.d)>0&&S0<=0;
+  let S=S0,tag='';
+  if(S0<=0){S=Math.max(slopeFor(vlow+0.01),Scap);tag=cascade?'상류 관저가 내려가 구배 소멸 → 하류 관저 하강':'역구배 해소';}
+  else if(vCur<vlow-1e-9){S=Math.max(slopeFor(vlow+0.01),Scap,S0);tag='유속 부족(허용 하한 미만)';}
+  else if(opt.floor&&vCur<opt.floor-1e-9){S=Math.max(slopeFor(opt.floor+0.003),Scap,S0);tag='유속 유지(하류 관저 하강으로 흡수 불가)';}
+  else if(opt.improve&&vCur<vmin-1e-9){const want=Math.max(slopeFor(vmin+0.005),Scap,S0),room=S0+(+opt.deepen)/L;S=Math.min(want,Math.max(room,Scap));if(S>S0+1e-9)tag='유지관리 유속 개선 (최대 추가 굴착 '+(+opt.deepen)+' m 이내)';}
+  else if(vCur>vmax+1e-9){const Sv=slopeFor(vmax-0.005),Sc=(p.invUp-(p.ghDn-secH(p)-(+opt.cover)))/L;S=Math.min(S0,Math.max(Sv,Scap,Sc));if(S<S0-1e-9)tag='유속 초과 → 구배 완화(하류 단차로 흡수)';}
+  if(S<Scap-1e-9&&Q>0){S=Math.max(S,Scap);tag=tag||'통수능 확보';}
+  S=Math.max(S,1e-4);
+  if(Math.abs(S-S0)>1e-9){
+    const raw=p.invUp-S*L;p.invDn=+(S>S0?Math.floor(raw*100)/100:Math.ceil(raw*100)/100).toFixed(2);
+    if(p.invDn>=p.invUp)p.invDn=+(p.invUp-0.01).toFixed(2);
+    return tag||'구배 조정';
+  }
+  return '';
+}
 // 유속·구배 자동 조정: 역구배 해소 > 통수능 유지 > 유속. 관경은 그대로, 관저고만 상류→하류 순서로 다시 정함.
 function autoSlope(pipes,crit,rain,opt){
   const orig=new Map(pipes.map(p=>[p.id,{u:p.invUp,d:p.invDn}]));
@@ -712,25 +748,7 @@ function autoSlope(pipes,crit,rain,opt){
       const inc=byDn.get(p.up)||[];
       p.invUp=+(inc.length?Math.min(o.u,...inc.map(q=>q.invDn)):o.u).toFixed(2);
       p.invDn=o.d;
-      const L=p.L,nb=Math.max(1,+p.nb||1),n=+p.n||0.013,Q=r.Q,S0=(p.invUp-p.invDn)/L;
-      const vOf=S=>Q>0?flowSec(p,Q/nb,S,n).V:flowSec(p,0,S,n).Vfull;
-      const slopeFor=t=>{let lo=1e-5,hi=0.5;if(vOf(hi)<t)return hi;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(vOf(m)<t)lo=m;else hi=m;}return hi;};
-      let Scap=1e-4;
-      if(Q>0){const cap=S=>{const c=Object.assign({},p,{invDn:p.invUp-S*L});const u=hydOf(c,Q);return allowAt(c,S,n,u).Q*nb;};
-        const need=Q*(1+(r.margin||0));if(cap(0.5)>=need){let lo=1e-5,hi=0.5;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(cap(m)<need)lo=m;else hi=m;}Scap=Math.max(Scap,hi);}}
-      const vCur=S0>0?vOf(S0):0,cascade=(o.u-o.d)>0&&S0<=0;
-      let S=S0,tag='';
-      if(S0<=0){S=Math.max(slopeFor(vlow+0.01),Scap);tag=cascade?'상류 관저가 내려가 구배 소멸 → 하류 관저 하강':'역구배 해소';}
-      else if(vCur<vlow-1e-9){S=Math.max(slopeFor(vlow+0.01),Scap,S0);tag='유속 부족(허용 하한 미만)';}
-      else if(opt.improve&&vCur<vmin-1e-9){const want=Math.max(slopeFor(vmin+0.005),Scap,S0),room=S0+(+opt.deepen)/L;S=Math.min(want,Math.max(room,Scap));if(S>S0+1e-9)tag='유지관리 유속 개선 (최대 추가 굴착 '+(+opt.deepen)+' m 이내)';}
-      else if(vCur>vmax+1e-9){const Sv=slopeFor(vmax-0.005),Sc=(p.invUp-(p.ghDn-secH(p)-(+opt.cover)))/L;S=Math.min(S0,Math.max(Sv,Scap,Sc));if(S<S0-1e-9)tag='유속 초과 → 구배 완화(하류 단차로 흡수)';}
-      if(S<Scap-1e-9&&Q>0){S=Math.max(S,Scap);tag=tag||'통수능 확보';}
-      S=Math.max(S,1e-4);
-      if(Math.abs(S-S0)>1e-9){
-        const raw=p.invUp-S*L;p.invDn=+(S>S0?Math.floor(raw*100)/100:Math.ceil(raw*100)/100).toFixed(2);
-        if(p.invDn>=p.invUp)p.invDn=+(p.invUp-0.01).toFixed(2);
-        note(p.id,tag);
-      }
+      const tg=fitInvDn(p,r,crit,opt,vmin,vmax,vlow,o);if(tg)note(p.id,tg);
       if(Math.abs(p.invUp-o.u)>0.0005&&!why.get(p.id))note(p.id,'상류 관저 하강에 따라 이동');
     }
     Qm=compute(pipes,crit,rain);
@@ -743,6 +761,65 @@ function autoSlope(pipes,crit,rain,opt){
   const remain=pipes.filter(p=>{const r=fin.get(p.id);if(r.pump)return false;const v=vj(r);return r.S<=0||v<vlow-1e-9||v>vmax+1e-9;}).map(p=>{const r=fin.get(p.id),v=vj(r);return{id:p.id,txt:r.S<=0?'역구배':v>vmax+1e-9?`유속 ${v.toFixed(2)} > ${vmax}`:`유속 ${v.toFixed(2)} < ${vlow}`};});
   restore();
   return{changes,before,after,maxDeep,drops,vlow,remain};
+}
+
+// 토피·지장물·접합 자동 조정: 관을 평행하게 내려(경사 유지) 접합·최소토피·지장물을 정리, 기준 토피가 안 되면 관보호공(-B)
+function autoCover(pipes,crit,rain,opt){
+  const orig=new Map(pipes.map(p=>[p.id,{u:p.invUp,d:p.invDn,code:p.code,st:(p.st||[]).map(t=>t.code)}]));
+  const byUp=new Map(),byDn=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
+  const dep=new Map(),depth=(p,st=new Set())=>{if(dep.has(p.id))return dep.get(p.id);if(st.has(p.id))return 0;st.add(p.id);let d=0;(byDn.get(p.up)||[]).forEach(q=>{d=Math.max(d,depth(q,st));});st.delete(p.id);dep.set(p.id,d+1);return d+1;};
+  const order=[...pipes].sort((a,b)=>depth(a)-depth(b));
+  const why=new Map(),note=(id,t)=>{const a=why.get(id)||[];if(!a.includes(t))a.push(t);why.set(id,a);};
+  const r2=v=>+(+v).toFixed(2);
+  const restore=()=>pipes.forEach(p=>{const o=orig.get(p.id);p.invUp=o.u;p.invDn=o.d;p.code=o.code;(p.st||[]).forEach((t,i)=>{t.code=o.st[i];});});
+  // 관 p를 dz만큼 평행하게 내림. 하류 관의 상류 관저가 이 관 하류 관저보다 높으면(접합 역류) 하류 관도 필요한 만큼 내림
+  const vmin=+crit.vmin,vmax=+crit.vmax,vlow=Math.min(+opt.vlow,vmin),fo={improve:false,deepen:0,cover:+opt.hard};
+  const resQ=compute(pipes,crit,rain);
+  // 하류 관의 상류 관저가 높으면(접합 역류) 맞춰 내리되, 하류 관은 관저를 그대로 두어 경사를 줄이는 방식으로 흡수(유속·통수능이 모자랄 때만 하류 관저도 내림)
+  const settle=(p,depthN=0)=>{
+    if(depthN>200)return;
+    (byUp.get(p.dn)||[]).forEach(q=>{const ex=q.invUp-p.invDn;if(!(ex>0.0005))return;
+      q.invUp=r2(p.invDn);const rq=resQ.get(q.id),vq=rq.Q>0?rq.V:rq.Vfull;const tg=fitInvDn(q,rq,crit,Object.assign({},fo,{floor:Math.min(vmin,vq)}),vmin,vmax,vlow,orig.get(q.id));
+      note(q.id,'접합 정리(상류 관저 하강)'+(tg?' → '+tg:' · 하류 관저는 유지(경사로 흡수)'));settle(q,depthN+1);});
+  };
+  // 관 p를 dz만큼 평행하게 내림(경사 유지)
+  const shiftDown=(p,dz,tag)=>{if(!(dz>0))return;dz=Math.ceil(dz*100-1e-9)/100;p.invUp=r2(p.invUp-dz);p.invDn=r2(p.invDn-dz);note(p.id,tag);settle(p);};
+  const stat=res=>{const o={joint:0,cover:0,prot:0,obs:0,hard:0};pipes.forEach(p=>{const r=res.get(p.id);if(r.joint)o.joint++;if(r.coverNG)o.cover++;if(r.coverProt)o.prot++;if(r.obsHits.length)o.obs++;if(!r.pump&&r.cmin<+opt.hard-0.0005)o.hard++;});return o;};
+  const res0=compute(pipes,crit,rain),before=stat(res0);
+  const cov0=new Map(pipes.map(p=>[p.id,res0.get(p.id).cmin]));
+  const ignored=[];
+  const zAtP=(p,c)=>p.invUp+(p.invDn-p.invUp)*c/p.L;
+  const hitsAt=(p,dz)=>{const D=secH(p),out=[];(p.obs||[]).forEach(o=>{const z=zAtP(p,Math.max(0,Math.min(p.L,o.off)))-dz,top=o.inv+o.h;const gap=top<=z?z-top:o.inv>=z+D?o.inv-(z+D):-Math.min(top-z,z+D-o.inv);if(gap<(crit.clear??0.3))out.push(o.name);});return out;};
+  // 1) 기존 접합 역류 정리 (상류→하류)
+  for(const p of order)settle(p);
+  // 2) 관별: 최소 토피 → (옵션) 기준 토피 → 지장물, 평행 이동
+  for(const p of order){
+    if(isPump(p))continue;
+    const res=compute(pipes,crit,rain),r=res.get(p.id),box=isBox(p),cTarget=box?(crit.coverBox??crit.cover):crit.cover;
+    let c=r.cmin,dz=0;
+    if(c<+opt.hard-1e-9)dz=+opt.hard-c;                                  // 반드시 확보
+    if(+opt.deepen>0&&c+dz<cTarget-1e-9)dz=Math.max(dz,Math.min(+opt.deepen,cTarget-c));   // 허용 범위 안에서 기준 토피까지
+    dz=Math.ceil(dz*100-1e-9)/100;
+    if(dz>0)shiftDown(p,dz,c<+opt.hard-1e-9?`최소 토피 ${(+opt.hard).toFixed(2)} m 확보`:'토피 확보');
+    // 지장물: 더 깊게 내려서 피할 수 있으면 내림 (가장 작은 깊이)
+    let h0=hitsAt(p,0);
+    if(h0.length){let pick=null;for(let x=0.05;x<=+opt.obs+1e-9;x+=0.05){if(!hitsAt(p,x).length){pick=+x.toFixed(2);break;}}
+      if(pick!=null)shiftDown(p,pick,'지장물 이격 확보('+h0.join(',')+')');}
+  }
+  // 3) 보호공: 기준 토피 미달이면 -B
+  const resB=compute(pipes,crit,rain);
+  for(const p of order){
+    const r=resB.get(p.id);if(r.pump)continue;const box=isBox(p),cTarget=box?(crit.coverBox??crit.cover):crit.cover;
+    if(r.cmin<cTarget-0.0005&&!isProt(p.code)){const base=codeBase(p.code)||PT.defCode;p.code=base+'-B';(p.st||[]).forEach(t=>{t.code=p.code;});note(p.id,`토피 ${r.cmin.toFixed(2)} m < ${cTarget.toFixed(2)} m → 관보호공(-B)`);}
+  }
+  const fin=compute(pipes,crit,rain),after=stat(fin);
+  pipes.forEach(p=>{const r=fin.get(p.id);if(r.obsHits.length)ignored.push({id:p.id,txt:r.obsHits.map(h=>`${h.name} 이격 ${h.gap.toFixed(2)} m`).join(', ')});});
+  const changes=pipes.filter(p=>{const o=orig.get(p.id);return Math.abs(p.invUp-o.u)>0.0005||Math.abs(p.invDn-o.d)>0.0005||(p.code||'')!==(o.code||'');}).map(p=>{const o=orig.get(p.id),r=fin.get(p.id);return{id:p.id,u0:o.u,d0:o.d,u1:p.invUp,d1:p.invDn,code0:o.code||'',code1:p.code||'',st0:o.st,c0:cov0.get(p.id),c1:r.cmin,why:why.get(p.id)||[]};});
+  const maxDeep=Math.max(0,...pipes.map(p=>orig.get(p.id).d-p.invDn));
+  const dropOf=p=>{const outs=byUp.get(p.dn)||[];return outs.length?p.invDn-Math.min(...outs.map(q=>q.invUp)):0;};
+  const drops06=pipes.filter(p=>dropOf(p)>0.6+1e-9).length,drops15=pipes.filter(p=>dropOf(p)>1.5+1e-9).length;
+  restore();
+  return{changes,before,after,maxDeep,drops06,drops15,ignored};
 }
 function slopeForV(p,Q,target){
   const nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
@@ -1522,6 +1599,24 @@ $('#bSlopeRun').onclick=runSlope;
 $('#bSlopeClose').onclick=()=>{$('#slopeDlg').hidden=true;};
 $('#bSlopeApply').onclick=()=>{if(!slopePlan||!slopePlan.changes.length)return;const ch=slopePlan.changes;
   edit(()=>{ch.forEach(c=>{const p=P(c.id);p.invUp=c.u1;p.invDn=c.d1;});});$('#slopeDlg').hidden=true;toast(`관저고 ${ch.length}개 관로 조정 (Ctrl+Z로 되돌리기)`);};
+
+/* ---------- 토피·지장물·접합 자동 조정 ---------- */
+let coverPlan=null;
+function runCover(){
+  const opt={vlow:(doc.rain&&doc.rain.type1>1)?0.6:crit.vlow,hard:isFinite(+$('#cHard').value)?+$('#cHard').value:0.4,deepen:isFinite(+$('#cDeep').value)?+$('#cDeep').value:0,obs:isFinite(+$('#cObs').value)?+$('#cObs').value:0.5};
+  coverPlan=autoCover(pipes,crit,doc.rain,opt);const a=coverPlan,b=a.before,f=a.after;
+  const rows=a.changes.map(c=>`<tr><td class="l">${esc(c.id)}</td><td>${f2(c.u0)}→${f2(c.u1)}</td><td>${f2(c.d0)}→${f2(c.d1)}</td><td>${f2(c.c0)}→<b>${f2(c.c1)}</b></td><td>${esc(c.code0||'-')}→<b>${esc(c.code1||'-')}</b></td><td class="l">${esc(c.why.join(', '))}</td></tr>`).join('');
+  const st=o=>`접합NG ${o.joint} · 토피부족 ${o.cover} · 보호공 ${o.prot} · ${(+$('#cHard').value||0.4).toFixed(1)}m 미만 ${o.hard} · 지장물 근접 ${o.obs}`;
+  $('#coverBody').innerHTML=`<div class="hint">변경 ${a.changes.length}개 · 가장 많이 깊어진 관저 ${a.maxDeep.toFixed(2)} m · 단차 0.6 m 초과 맨홀 ${a.drops06} (1.5 m 초과 ${a.drops15})</div><div class="hint">조정 전: ${st(b)}</div><div class="hint">조정 후: ${st(f)}</div>`+
+    (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>상류 관저</th><th>하류 관저</th><th>토피</th><th>공법</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다.</div>')+
+    (a.ignored.length?`<div class="hint" style="margin-top:6px">⚠ 지장물을 피하지 못해 <b>무시한</b> 관로 ${a.ignored.length}개 (지장물 이설 또는 구조 검토): ${a.ignored.map(r=>esc(r.id)+' ('+esc(r.txt)+')').join(', ')}</div>`:'');
+  $('#bCoverApply').disabled=!a.changes.length;
+}
+$('#bAuto3').onclick=()=>{runCover();$('#coverDlg').hidden=false;};
+$('#bCoverRun').onclick=runCover;
+$('#bCoverClose').onclick=()=>{$('#coverDlg').hidden=true;};
+$('#bCoverApply').onclick=()=>{if(!coverPlan||!coverPlan.changes.length)return;const ch=coverPlan.changes;
+  edit(()=>{ch.forEach(c=>{const p=P(c.id);p.invUp=c.u1;p.invDn=c.d1;if((p.code||'')!==c.code1){p.code=c.code1;(p.st||[]).forEach(t=>{t.code=c.code1;});}});});$('#coverDlg').hidden=true;toast(`토피·지장물 조정 ${ch.length}개 관로 (Ctrl+Z로 되돌리기)`);};
 const stepD=k=>{const p=P(ui.sel);
   if(isBox(p)){   // 폭과 높이를 같이 0.1 m씩 (폭·높이는 표에서 직접 입력도 가능)
     const H=Math.max(0.3,+(+p.D+0.1*k).toFixed(2)),W=Math.max(0.3,+(+p.W+0.1*k).toFixed(2));edit(()=>{p.D=H;p.W=W;});return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
