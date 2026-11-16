@@ -59,6 +59,20 @@ th.cmp,td.cmp{background:var(--panel2)}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;min-width:0}
 .xsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.xscell{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel2);min-width:0}.xshead{font-size:12px;margin-bottom:2px}svg.xs{width:100%;height:auto;display:block}.xst{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}.xst th,.xst td{border:1px solid var(--line);padding:1px 6px}.xst th{font-weight:400;color:var(--muted);text-align:left;width:46%}.xst td{text-align:right}.xsopt{margin-bottom:8px}.xsopt summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.xsparams{display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0;font-size:12px}.xsparams input{width:58px}
 .card.big{position:fixed;inset:0;z-index:60;margin:0;border-radius:0;overflow:auto;border:0}body.bigOn{overflow:hidden}#profWrap.panning,#profWrap.spacePan{cursor:grab}#profWrap.panning{cursor:grabbing}
+.menu{position:relative;display:inline-block}
+.menu>summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:var(--panel);white-space:nowrap;user-select:none}
+.menu>summary::-webkit-details-marker{display:none}
+.menu>summary::after{content:" ▾";color:var(--muted)}
+.menu[open]>summary{border-color:var(--accent)}
+.menu-pop{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:170px;display:flex;flex-direction:column;align-items:stretch;gap:6px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.menu-pop.r{left:auto;right:0}.menu-pop.wide{min-width:300px;max-width:min(560px,92vw);white-space:normal}
+.menu-pop button{text-align:left}
+.menu-pop .hint{display:block}
+.card[data-fold]>.card-h{cursor:pointer}
+.card[data-fold]>.card-h h2::before{content:"▾ "}
+.card.folded>.card-h h2::before{content:"▸ "}
+.card.folded>*:not(.card-h){display:none!important}
+.card.folded>.card-h{margin-bottom:0}
 .card-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin-bottom:8px}
 .grid{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:14px;align-items:start}
 .col{display:flex;flex-direction:column;gap:14px;min-width:0}
@@ -172,17 +186,21 @@ button,.tab{touch-action:manipulation}
     <div class="btns">
       <button id="bUndo" title="Ctrl+Z">되돌리기</button>
       <button id="bRedo" title="Ctrl+Y">다시하기</button>
-      <button id="bSeed" title="업로드한 PipeTools 파일의 BC 노선 (종단파일 + 수리계산 + 결과)">BC 자료</button>
-      <button id="bReset">가상 예제</button>
-      <button id="bStorm" title="PipeTools 우수 샘플 (General 강우식, BOX 포함) + 결과(rpt)">우수 예제</button>
+      <details class="menu"><summary>예제 자료</summary><div class="menu-pop">
+        <button id="bSeed" title="업로드한 PipeTools 파일의 BC 노선 (종단파일 + 수리계산 + 결과)">BC 자료 (오수)</button>
+        <button id="bReset">가상 예제</button>
+        <button id="bStorm" title="PipeTools 우수 샘플 (General 강우식, BOX 포함) + 결과(rpt)">우수 예제</button>
+      </div></details>
     </div>
     <div class="sp"></div>
     <div class="btns">
       <label class="filebtn" for="fileIn">PipeTools 엑셀 열기</label><input id="fileIn" type="file" accept=".xlsx,.xlsm,.xls" hidden>
-      <button id="bPaste">시트 붙여넣기</button>
-      <button id="bCopyProf" title="현재 노선의 종단파일 시트 (PipeTools 형식)">종단파일 복사</button>
-      <button id="bCopyIn" title="PipeTools 수리계산 시트 A~AG">수리시트 복사</button>
-      <button id="bCopyOut" title="PipeTools 결과(rpt) 시트와 같은 열 구성">계산결과 복사 (rpt 양식)</button>
+      <details class="menu"><summary>붙여넣기·복사</summary><div class="menu-pop r">
+        <button id="bPaste">시트 붙여넣기</button>
+        <button id="bCopyProf" title="현재 노선의 종단파일 시트 (PipeTools 형식)">종단파일 복사</button>
+        <button id="bCopyIn" title="PipeTools 수리계산 시트 A~AG">수리시트 복사</button>
+        <button id="bCopyOut" title="PipeTools 결과(rpt) 시트와 같은 열 구성">계산결과 복사 (rpt 양식)</button>
+      </div></details>
     </div>
   </div>
 
@@ -200,7 +218,7 @@ button,.tab{touch-action:manipulation}
       <label class="hint">원형 호칭 mm (쉼표) <input id="catCirc" style="width:100%"></label>
       <label class="hint">BOX 폭x높이 m (쉼표) <textarea id="catBox" spellcheck="false" style="min-height:70px"></textarea></label>
     </details>
-    <div class="btns"><button id="bAutoRun">다시 계산</button><button id="bAutoApply" class="on">적용</button><button id="bAutoClose">닫기</button></div>
+    <div class="btns"><button id="bAutoRun">다시 계산</button><button id="bAutoApply" class="on">적용</button><button class="bBackAll" title="전체 자동 조정 화면으로">← 전체</button><button id="bAutoClose">닫기</button></div>
   </div>
 
   <div class="dlg" id="slopeDlg" hidden>
@@ -212,7 +230,7 @@ button,.tab{touch-action:manipulation}
       <label>유속 낮추기 시 최소 토피 <input id="aCover" type="number" step="0.1" value="0.4" style="width:62px"> m</label>
     </div>
     <div id="slopeBody" style="max-height:320px;overflow:auto"></div>
-    <div class="btns"><button id="bSlopeRun">다시 계산</button><button id="bSlopeApply" class="on">적용</button><button id="bSlopeClose">닫기</button></div>
+    <div class="btns"><button id="bSlopeRun">다시 계산</button><button id="bSlopeApply" class="on">적용</button><button class="bBackAll" title="전체 자동 조정 화면으로">← 전체</button><button id="bSlopeClose">닫기</button></div>
   </div>
 
   <div class="dlg" id="coverDlg" hidden>
@@ -223,11 +241,12 @@ button,.tab{touch-action:manipulation}
       <label title="지장물을 피하려고 관로당 더 팔 수 있는 깊이">지장물 회피용 추가 굴착 <input id="cObs" type="number" step="0.1" value="0.5" style="width:62px"> m</label>
     </div>
     <div id="coverBody" style="max-height:320px;overflow:auto"></div>
-    <div class="btns"><button id="bCoverRun">다시 계산</button><button id="bCoverApply" class="on">적용</button><button id="bCoverClose">닫기</button></div>
+    <div class="btns"><button id="bCoverRun">다시 계산</button><button id="bCoverApply" class="on">적용</button><button class="bBackAll" title="전체 자동 조정 화면으로">← 전체</button><button id="bCoverClose">닫기</button></div>
   </div>
 
   <div class="dlg" id="allDlg" hidden>
     <div class="bar"><strong>전체 자동 조정</strong><span class="sub">우선순위 <b>역구배 &gt; 통수능 &gt; 유속 &gt; 토피 &gt; 지장물</b> 순서로 관경과 관저고를 함께 조정합니다. 통수능 부족은 관경 상향, 유속은 구배(관저고)와 맨홀 단차, 구배로 못 잡는 최대유속 초과는 관경을 더 키워 다시 계산, 토피 부족은 관보호공(-B), 못 피한 지장물은 무시하고 표시합니다. 세부 옵션은 각 단계 대화상자의 값을 씁니다.</span></div>
+    <div class="hint">세부 단계만 따로 실행: <button id="bAuto">통수능(관경)</button> <button id="bAuto2">유속·구배</button> <button id="bAuto3">토피·지장물</button></div>
     <div class="hint"><label title="유출관 상류 관저를 유입관 하류 관저와 같게 맞춤(관저접합). 유속 초과는 구배 완화 대신 관경 상향으로 해결, 단차를 없애면 토피가 줄어 보호공이 늘 수 있음"><input id="aNoDrop" type="checkbox"> 맨홀 단차 없애기 (관저접합)</label></div>
     <div id="allBody" style="max-height:340px;overflow:auto"></div>
     <div class="btns"><button id="bAllRun">다시 계산</button><button id="bAllApply" class="on">적용</button><button id="bAllClose">닫기</button></div>
@@ -246,22 +265,23 @@ button,.tab{touch-action:manipulation}
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
-          <button id="bAutoAll" class="on" title="통수능·유속·토피·지장물을 우선순위대로 한 번에 조정하는 제안 (적용 전에 미리보기)">전체 자동 조정</button>
-          <button id="bAuto3" title="접합 정리, 최소 토피 확보, 지장물 회피, 토피 부족 시 관보호공 처리 제안 (적용 전에 미리보기)">토피·지장물 자동 조정</button>
-          <button id="bAuto2" title="역구배·유속 부족/초과 관로의 관저고(구배)를 자동 조정하는 제안 (적용 전에 미리보기)">유속·구배 자동 조정</button>
-          <button id="bAuto" title="통수능이 부족한 관로의 관경을 규격 목록에서 자동으로 키우는 제안 (적용 전에 미리보기)">통수능 자동 조정</button>
+          <button id="bAutoAll" class="on" title="통수능·유속·토피·지장물을 우선순위대로 한 번에 조정하는 제안 (적용 전에 미리보기)">자동 조정</button>
           <button id="bRange" title="누른 뒤 종단에서 시작·끝 맨홀 두 개를 클릭(탭)하면 그 사이 관저를 한 경사로 일직선 정리. 데스크톱은 Shift+클릭 두 번도 가능">구간 일직선</button>
           <div class="seg" role="group" aria-label="수면 계산"><button id="wU" class="on" title="관로마다 등류(Manning) 수심">등류</button><button id="wG" title="방류구 수위에서 상류로 표준축차법 수면곡선">부등류</button></div>
-          <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="AutoCAD용 종단도(DXF). 가로 H, 세로 V 축척 (예: H=500, V=100)">H 1/<input id="dxfH" type="number" value="500" step="50" min="50" style="width:56px"> V 1/<input id="dxfV" type="number" value="100" step="10" min="10" style="width:52px"><button id="bDxf">DXF</button></label>
-          <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="방류구 하류단 수위 (하천·바다 수위). 비우면 자유/등류. 입력하면 부등류로 계산">외수위 <input id="tailWL" type="number" step="0.01" inputmode="decimal" placeholder="자유" style="width:64px"> m</label>
-          <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="우수 강우강도 배율 (확률강우 증가 검토). 우수 계산에만 적용">강우 ×<input id="rainScale" type="number" step="0.05" min="0.1" value="1" inputmode="decimal" style="width:54px"></label>
           <div class="seg" role="group" aria-label="표시"><button id="vVel" class="on" title="관 위 표시: 실유속">유속</button><button id="vCap" title="관 위 표시: 유량비 Q/Qfull">통수능</button></div>
           <div class="seg" role="group" aria-label="가로 축척"><button id="zOut" aria-label="축소">－</button><button id="zFit" title="노선 전체를 화면에">전체</button><button id="zIn" aria-label="확대">＋</button></div>
-          <span class="hint" id="scaleNote" title="지금 화면의 가로·세로 축척 (96dpi 기준 근사). 세로는 항상 가로 × H/V 비율"></span><button id="bScale" title="가로 축척을 위 H 값(1/H) 크기로 맞춤 (96dpi 기준)">축척대로</button>
           <button id="bBig" title="종단을 화면 가득 크게 보기 (F, 닫기 Esc)">⛶ 크게</button>
           <div class="sp"></div>
-          <div class="hint touch-only">관저 점을 눌러 선택 → 위아래로 끌거나 하단 버튼(길게 누르면 연속)으로 조정 · 좌우로 밀면 종단 스크롤</div>
-          <div class="hint kbd-only">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동 · <b>휠</b> 확대·축소(커서 기준, 위 H·V 비율 고정) · <b>휠 버튼</b> 또는 <kbd>Space</kbd>+드래그 이동 · <kbd>Home</kbd> 전체 · <kbd>F</kbd> 크게 · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 되돌리기·다시하기</div>
+          <details class="menu"><summary>설정·DXF</summary><div class="menu-pop r wide">
+            <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="방류구 하류단 수위 (하천·바다 수위). 비우면 자유/등류. 입력하면 부등류로 계산">외수위 <input id="tailWL" type="number" step="0.01" inputmode="decimal" placeholder="자유" style="width:64px"> m</label>
+            <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="우수 강우강도 배율 (확률강우 증가 검토). 우수 계산에만 적용">강우 ×<input id="rainScale" type="number" step="0.05" min="0.1" value="1" inputmode="decimal" style="width:54px"></label>
+            <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="AutoCAD용 종단도(DXF). 가로 H, 세로 V 축척 (예: H=500, V=100)">H 1/<input id="dxfH" type="number" value="500" step="50" min="50" style="width:56px"> V 1/<input id="dxfV" type="number" value="100" step="10" min="10" style="width:52px"><button id="bDxf">DXF</button></label>
+            <span class="hint" id="scaleNote" title="지금 화면의 가로·세로 축척 (96dpi 기준 근사). 세로는 항상 가로 × H/V 비율"></span><button id="bScale" title="가로 축척을 위 H 값(1/H) 크기로 맞춤 (96dpi 기준)">축척대로</button>
+          </div></details>
+          <details class="menu"><summary>도움말</summary><div class="menu-pop r wide">
+            <div class="hint touch-only">관저 점을 눌러 선택 → 위아래로 끌거나 하단 버튼(길게 누르면 연속)으로 조정 · 좌우로 밀면 종단 스크롤</div>
+            <div class="hint kbd-only">관저 점 <b>드래그</b> · 관 몸통 드래그 = 평행이동 · <kbd>↑</kbd><kbd>↓</kbd> ±0.01 (<kbd>Shift</kbd> ±0.10) · <kbd>←</kbd><kbd>→</kbd> 점 이동 · <kbd>Ctrl</kbd> 단독 · <kbd>Alt</kbd> 연동 · <b>휠</b> 확대·축소(커서 기준, 위 H·V 비율 고정) · <b>휠 버튼</b> 또는 <kbd>Space</kbd>+드래그 이동 · <kbd>Home</kbd> 전체 · <kbd>F</kbd> 크게 · <kbd>Ctrl</kbd>+<kbd>Z</kbd>/<kbd>Y</kbd> 되돌리기·다시하기</div>
+          </div></details>
         </div>
         <div class="rangebar" id="rangeBar" hidden>
           <strong>구간 일직선</strong>
@@ -306,7 +326,7 @@ button,.tab{touch-action:manipulation}
         <svg id="rainChart" viewBox="0 0 280 160" style="width:100%;display:block" aria-label="강우강도 곡선"></svg>
         <div class="rainform" id="rainForm"></div>
       </div>
-      <div class="card">
+      <div class="card folded" data-fold="1">
         <div class="card-h"><h2>판정 기준</h2></div>
         <div class="crit">
           <label for="cVmin">최소유속 (m/s)</label><input id="cVmin" type="number" step="0.05" value="0.6">
@@ -324,7 +344,7 @@ button,.tab{touch-action:manipulation}
     </div>
   </div>
 
-  <div class="card" id="xsCard">
+  <div class="card" id="xsCard" data-fold="1">
     <div class="card-h"><h2>횡단면도 (매설 단면)</h2><span class="hint" id="xsNote"></span><div class="sp"></div><button id="bXsDxf" title="현재 노선의 횡단면도를 AutoCAD용 DXF(zip)로 저장">횡단 DXF</button></div>
     <details class="xsopt"><summary>단면 기준 (PipeTools 횡단면도 옵션)</summary><div class="xsparams" id="xsParams"></div>
       <div class="hint">오픈컷(OP)은 구배 단면, 간이흙막이·SHEET PILE·H-PILE(GA·SP·HP)은 수직 단면, 관보호공(-B)은 보호공 상자로 그립니다. 흙막이 두께 0.15 m는 PipeTools 샘플(D200 폭 1.50 m)에 맞춘 값이라 확인이 필요합니다.</div></details>
@@ -1644,7 +1664,15 @@ $('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;
   p.D=orig;if(pick===orig){toast('현재 관경이 최소 적합 관경입니다');return;}
   edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
 
-const showDlg=sel=>{try{$(sel).scrollIntoView({block:'start',behavior:'smooth'});}catch(e){}};
+const showDlg=sel=>{['#allDlg','#autoDlg','#slopeDlg','#coverDlg'].forEach(d=>{if(d!==sel)$(d).hidden=true;});try{$(sel).scrollIntoView({block:'start',behavior:'smooth'});}catch(e){}};
+/* ---------- 메뉴·접기 ---------- */
+document.addEventListener('click',e=>{
+  document.querySelectorAll('details.menu[open]').forEach(d=>{if(!d.contains(e.target)||(e.target.closest('button')&&d.querySelector('.menu-pop')?.contains(e.target)))d.open=false;});
+  const h=e.target.closest('.card[data-fold]>.card-h');
+  if(h&&!e.target.closest('button,a,input,select,label,summary')){const c=h.parentElement;c.classList.toggle('folded');if(!c.classList.contains('folded'))render();}
+});
+document.addEventListener('click',e=>{if(e.target.closest('.bBackAll'))$('#bAutoAll').click();});
+
 /* ---------- 통수능 자동 조정 ---------- */
 let autoPlan=null;
 const secStr=(b,v)=>b?`□${(+v.W).toFixed(2)}×${(+v.D).toFixed(2)}`:`D${v.D}`;
