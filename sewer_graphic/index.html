@@ -60,6 +60,8 @@ th.cmp,td.cmp{background:var(--panel2)}
 .xsgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}.xscell{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:var(--panel2);min-width:0}.xshead{font-size:12px;margin-bottom:2px}svg.xs{width:100%;height:auto;display:block}.xst{width:100%;border-collapse:collapse;font-size:11px;margin-top:4px}.xst th,.xst td{border:1px solid var(--line);padding:1px 6px}.xst th{font-weight:400;color:var(--muted);text-align:left;width:46%}.xst td{text-align:right}.xsopt{margin-bottom:8px}.xsopt summary{cursor:pointer;font-size:12.5px;color:var(--muted)}.xsparams{display:flex;flex-wrap:wrap;gap:6px 12px;margin:6px 0;font-size:12px}.xsparams input{width:58px}
 .card.big{position:fixed;inset:0;z-index:60;margin:0;border-radius:0;overflow:auto;border:0}body.bigOn{overflow:hidden}#profWrap.panning,#profWrap.spacePan{cursor:grab}#profWrap.panning{cursor:grabbing}
 .tolgrid{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;padding:8px 2px}.tolgrid b{flex-basis:100%;font-size:12px;color:var(--muted)}.tolgrid input[type=number]{width:64px}.tol>summary{display:inline-block;cursor:pointer;list-style:none;border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:5px 12px;font-size:13px;font-weight:600;user-select:none}.tol>summary::-webkit-details-marker{display:none}.tol>summary::after{content:" ▾"}.tol[open]>summary{background:var(--accent-soft)}.tol[open]>summary::after{content:" ▴"}.tol[open]{border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.invbox{margin-top:8px;border-top:1px solid var(--line);padding-top:6px}.invbox>summary{cursor:pointer;font-weight:600;font-size:13px;list-style:none;padding:2px 0}.invbox>summary::-webkit-details-marker{display:none}.invbox>summary::before{content:"▾ ";color:var(--muted)}.invbox:not([open])>summary::before{content:"▸ "}
+.invwrap{overflow-x:auto;max-width:100%}#invTbl{width:auto;min-width:100%}#invTbl th,#invTbl td{text-align:right;position:static;background:transparent}#invTbl th.rowh{text-align:left;position:sticky;left:0;z-index:1;background:var(--panel);color:var(--muted);font-size:11.5px;font-weight:600;border-right:1px solid var(--line)}#invTbl td.sel,#invTbl th.sel{background:var(--accent-soft)}#invTbl td.hd{cursor:pointer;font-weight:600;font-family:var(--sans)}#invTbl input{width:64px;text-align:right}#invTbl td.dropc{color:var(--muted)}
 .menu{position:relative;display:inline-block}
 .menu>summary{list-style:none;cursor:pointer;border:1px solid var(--line);border-radius:6px;padding:5px 10px;background:var(--panel);white-space:nowrap;user-select:none}
 .menu>summary::-webkit-details-marker{display:none}
@@ -267,13 +269,6 @@ button,.tab{touch-action:manipulation}
 
   <div class="grid">
     <div class="col">
-      <div class="card plan-card">
-        <div class="card-h"><h2 id="planTitle">관망 평면 (모식도)</h2><div class="sp"></div>
-          <div class="legend"><span><i style="background:var(--good)"></i>적합</span><span><i style="background:var(--warn)"></i>유속 주의(유지관리)</span><span><i style="background:var(--bad)"></i>용량·역구배·접합 불량</span></div>
-        </div>
-        <svg id="plan" aria-label="관망 평면 모식도"></svg>
-      </div>
-
       <div class="card" id="profCard">
         <div class="card-h">
           <h2>종단</h2>
@@ -307,7 +302,16 @@ button,.tab{touch-action:manipulation}
           <div class="hint" style="flex-basis:100%">시점·종점 관저를 끌면 사이 맨홀이 모두 한 경사로 따라옵니다. 구간 안 관 몸통을 끌면 구간 전체가 평행이동합니다. 종단의 맨홀을 눌러 시점·종점을 바꿀 수도 있습니다.</div>
         </div>
         <div class="scroll" id="profWrap"><svg id="prof" aria-label="종단면도"></svg></div>
+        <details class="invbox" open><summary>관저고 조정표 <span class="hint">· 값을 고치면 위 종단도에 바로 반영 (맨홀 연동/끝점 단독 설정 따름)</span></summary>
+          <div class="invwrap"><table id="invTbl"></table></div></details>
       </div>
+      <div class="card plan-card">
+        <div class="card-h"><h2 id="planTitle">관망 평면 (모식도)</h2><div class="sp"></div>
+          <div class="legend"><span><i style="background:var(--good)"></i>적합</span><span><i style="background:var(--warn)"></i>유속 주의(유지관리)</span><span><i style="background:var(--bad)"></i>용량·역구배·접합 불량</span></div>
+        </div>
+        <svg id="plan" aria-label="관망 평면 모식도"></svg>
+      </div>
+
       <div class="card">
         <div class="card-h"><h2>통수능 검토</h2><span class="hint" id="capNote"></span><div class="sp"></div>
           <div class="legend"><span><i style="background:var(--good)"></i>여유 있음</span><span><i style="background:var(--warn)"></i>한계의 90% 이상</span><span><i style="background:var(--bad)"></i>여유율 부족</span></div></div>
@@ -1237,6 +1241,9 @@ function shiftEnd(pid,end,delta,linked){
 }
 
 function render(){
+  if(render.busy)return;render.busy=true;try{renderInner();}finally{render.busy=false;}
+}
+function renderInner(){
   routes=routesOf(pipes);
   if(!routes.has(ui.route))ui.route=routes.keys().next().value;
   applyRange();
@@ -2164,7 +2171,25 @@ function cmpCells(p,r){
 }
 
 /* ---------- 표 ---------- */
+function renderInvTable(){
+  const el=$('#invTbl');if(!el||!routes)return;const ch=routes.get(ui.route)||[];
+  const inp=(k,p,v,extra='')=>`<input data-k="${k}" data-pid="${esc(p.id)}" value="${v}" inputmode="decimal" aria-label="${k}"${extra}>`;
+  const row=(label,f,cls='')=>`<tr><th class="rowh">${label}</th>${ch.map((p,i)=>`<td class="${p.id===ui.sel?'sel ':''}${cls}">${f(p,i,res.get(p.id))}</td>`).join('')}</tr>`;
+  const chg=(p,k)=>new Set(changedKeys(p)).has(k)?' style="color:var(--accent)"':'';
+  el.innerHTML='<tbody>'+
+    `<tr><th class="rowh">관로</th>${ch.map(p=>`<td class="hd ${p.id===ui.sel?'sel':''}" data-pid="${esc(p.id)}">${esc(p.id)}</td>`).join('')}</tr>`+
+    row('상류→하류',p=>`${esc(p.up)}→${esc(p.dn)}`)+
+    row('<b>상류 관저고</b>',p=>inp('invUp',p,f2(p.invUp),chg(p,'invUp')))+
+    row('<b>하류 관저고</b>',p=>inp('invDn',p,f2(p.invDn),chg(p,'invDn')))+
+    row('경사 ‰',(p,i,r)=>inp('S',p,r.S.toFixed(2)))+
+    row('맨홀 단차 (하류)',(p,i)=>{const nx=ch[i+1];if(!nx)return '—';const d=p.invDn-nx.invUp;return Math.abs(d)<0.0005?'0':(d>0?'+':'')+d.toFixed(2);},'dropc')+
+    row('유속 m/s',(p,i,r)=>`<span style="color:var(--${stCls(r.vLabel==='GOOD'?0:/^NG|구배/.test(r.vLabel||'')?2:r.vLabel?1:0)})">${(r.Q>0?r.V:r.Vfull).toFixed(2)}</span>`)+
+    row('토피 상류 m',(p,i,r)=>`<span style="color:${r.coverNG?'var(--bad)':r.coverProt?'var(--warn)':'inherit'}">${f2(r.covUp)}</span>`)+
+    row('판정',(p,i,r)=>`<span class="remark ${stCls(r.st)}">${r.rem.map(esc).join(' ')}</span>`)+
+  '</tbody>';
+}
 function renderTable(){
+  renderInvTable();
   const list=ui.tableAll?[...routes.values()].flat():routes.get(ui.route);
   let h=`<thead><tr><th class="l">관로</th><th class="l">노선</th><th class="l">상류→하류</th><th>연장</th><th>관경</th><th>경사‰</th><th>INV 상</th><th>INV 하</th><th>GH 상</th><th>GH 하</th><th class="l">공법</th>${doc.rain?.type1>1?'<th>누가면적 ha</th><th>평균C</th><th>유달 분</th><th>I mm/hr</th>':'<th>누가인구</th>'}<th>Q ${qu()}</th><th>Qfull</th><th>V m/s</th><th>h/D</th><th title="Q/Qfull (PipeTools 유량비)">유량비</th><th title="${crit.coverMode==='all'?'상·하류단과 모든 측점 중 최소':'관로 상류단 (PipeTools 방식)'}">토피${crit.coverMode==='all'?' min':' 상류'}</th><th class="l">판정</th><th class="l">토피·지장물</th>${crit.gvf?'<th>수위 상</th><th>수위 하</th><th class="l">부등류</th>':''}${cmpOn()?'<th class="cmp">PT 실유속</th><th class="cmp">ΔV</th><th class="cmp">PT 실수심 mm</th><th class="cmp">Δh mm</th><th class="cmp">PT Qfull</th><th class="cmp l">PT 판정 (여유율·유속·토피)</th>':''}</tr></thead><tbody>`;
   list.forEach(p=>{const r=res.get(p.id),chg=new Set(changedKeys(p)),cc=k=>chg.has(k)?' class="chg"':'';
@@ -2177,7 +2202,7 @@ function renderTable(){
       `<td class="l"><span class="remark ${stCls(r.st)}">${r.rem.map(esc).join(' ')}</span></td><td class="l">${r.flags.map(x=>`<span class="flagtxt">${esc(x)}</span>`).join(' ')}</td>${r.g?`<td>${f2(r.g.Hup)}</td><td>${f2(r.g.Hdn)}</td><td class="l"><span class="remark ${r.g.label==='GOOD'?'good':'bad'}">${esc(r.g.label)}</span></td>`:''}${cmpCells(p,r)}</tr>`;});
   $('#tbl').innerHTML=h+'</tbody>';
 }
-$('#tbl').addEventListener('change',e=>{
+const tblChange=e=>{
   const el=e.target,k=el.dataset.k,p=P(el.dataset.pid);if(!k||!p)return;
   const v=parseFloat(el.value);
   if(!isFinite(v)){toast('숫자를 입력하세요. 원래 값으로 되돌렸습니다');render();return;}
@@ -2187,7 +2212,9 @@ $('#tbl').addEventListener('change',e=>{
     else if(k==='invUp'||k==='invDn')shiftEnd(p.id,k==='invUp'?'up':'dn',r3(v-p[k]),ui.linked);
     else p[k]=v;
   });
-});
+};
+$('#tbl').addEventListener('change',tblChange);$('#invTbl').addEventListener('change',tblChange);
+$('#invTbl').addEventListener('click',e=>{const td=e.target.closest('td.hd');if(!td)return;const p=P(td.dataset.pid);if(p){ui.sel=p.id;ui.handle={pid:p.id,end:'dn'};render();}});
 $('#tbl').addEventListener('click',e=>{if(e.target.closest('input,select'))return;const tr=e.target.closest('tr[data-pid]');if(!tr)return;const p=P(tr.dataset.pid);
   if(p.line!==ui.route)selectRoute(p.line,p.id);else{ui.sel=p.id;ui.handle={pid:p.id,end:'dn'};render();}});
 $('#uS').onclick=()=>{ui.qd=false;render();};$('#uD').onclick=()=>{ui.qd=true;render();};
