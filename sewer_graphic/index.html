@@ -228,6 +228,7 @@ button,.tab{touch-action:manipulation}
 
   <div class="dlg" id="allDlg" hidden>
     <div class="bar"><strong>전체 자동 조정</strong><span class="sub">우선순위 <b>역구배 &gt; 통수능 &gt; 유속 &gt; 토피 &gt; 지장물</b> 순서로 관경과 관저고를 함께 조정합니다. 통수능 부족은 관경 상향, 유속은 구배(관저고)와 맨홀 단차, 구배로 못 잡는 최대유속 초과는 관경을 더 키워 다시 계산, 토피 부족은 관보호공(-B), 못 피한 지장물은 무시하고 표시합니다. 세부 옵션은 각 단계 대화상자의 값을 씁니다.</span></div>
+    <div class="hint"><label title="유출관 상류 관저를 유입관 하류 관저와 같게 맞춤(관저접합). 유속 초과는 구배 완화 대신 관경 상향으로 해결, 단차를 없애면 토피가 줄어 보호공이 늘 수 있음"><input id="aNoDrop" type="checkbox"> 맨홀 단차 없애기 (관저접합)</label></div>
     <div id="allBody" style="max-height:340px;overflow:auto"></div>
     <div class="btns"><button id="bAllRun">다시 계산</button><button id="bAllApply" class="on">적용</button><button id="bAllClose">닫기</button></div>
   </div>
@@ -760,9 +761,9 @@ function autoSlope(pipes,crit,rain,opt){
     for(const p of order){
       const o=orig.get(p.id),r=Qm.get(p.id);if(isPump(p)){continue;}
       const inc=byDn.get(p.up)||[];
-      p.invUp=+(inc.length?Math.min(o.u,...inc.map(q=>q.invDn)):o.u).toFixed(2);
+      p.invUp=+(inc.length?(opt.noDrop?Math.min(...inc.map(q=>q.invDn)):Math.min(o.u,...inc.map(q=>q.invDn))):o.u).toFixed(2);
       p.invDn=o.d;
-      const md=opt.maxDrop??1.5,tg=fitInvDn(p,r,crit,Object.assign({},opt,{dropUp:opt.dropUp!==false,upLimit:(inc.length?Math.min(...inc.map(q=>q.invDn)):o.u)-md}),vmin,vmax,vlow,o);if(tg)note(p.id,tg);
+      const md=opt.maxDrop??1.5,tg=fitInvDn(p,r,crit,Object.assign({},opt,{dropUp:opt.dropUp!==false&&!opt.noDrop,upLimit:(inc.length?Math.min(...inc.map(q=>q.invDn)):o.u)-md}),vmin,vmax,vlow,o);if(tg)note(p.id,tg);
       if(Math.abs(p.invUp-o.u)>0.0005&&!why.get(p.id))note(p.id,'상류 관저 하강에 따라 이동');
     }
     Qm=compute(pipes,crit,rain);
@@ -836,6 +837,21 @@ function autoCover(pipes,crit,rain,opt){
   return{changes,before,after,maxDeep,drops06,drops15,ignored};
 }
 
+
+// 맨홀 단차 제거: 유출관 상류 관저 = 유입관 하류 관저(관저접합). 유입관이 여러 개면 가장 낮은 쪽에 맞춤(나머지 유입관은 하류 관저를 내림)
+function closeDrops(pipes,crit,rain,vmin,vmax,vlow,orig,note){
+  const byDn=new Map(),byUp=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
+  const dep=new Map(),depth=(p,st=new Set())=>{if(dep.has(p.id))return dep.get(p.id);if(st.has(p.id))return 0;st.add(p.id);let d=0;(byDn.get(p.up)||[]).forEach(q=>{d=Math.max(d,depth(q,st));});st.delete(p.id);dep.set(p.id,d+1);return d+1;};
+  const order=[...pipes].sort((a,b)=>depth(a)-depth(b)),res=compute(pipes,crit,rain);
+  const fo={improve:false,deepen:0,cover:0.4};
+  for(const q of order){
+    const inc=byDn.get(q.up)||[];if(!inc.length||isPump(q))continue;
+    const t=Math.min(...inc.map(r=>r.invDn));
+    inc.forEach(r=>{if(r.invDn>t+0.0005&&r.invUp>t+0.005){r.invDn=+t.toFixed(2);note(r.id,'맨홀 단차 제거(하류 관저 내림)');}});
+    if(Math.abs(q.invUp-t)>0.0005){q.invUp=+t.toFixed(2);const rq=res.get(q.id),vq=rq.Q>0?rq.V:rq.Vfull;
+      const tg=fitInvDn(q,rq,crit,Object.assign({},fo,{floor:Math.min(vmin,vq)}),vmin,vmax,vlow,orig.get(q.id));note(q.id,'맨홀 단차 제거(관저접합)'+(tg?' → '+tg:''));}
+  }
+}
 // 전체 자동 조정: 통수능(관경) → 유속·구배 → (유속 초과가 남으면 관경 더 키워 반복) → 토피·지장물·접합. 원본은 복원하고 제안만 반환
 function autoAll(pipes,crit,rain,cat,opt){
   const snap=()=>new Map(pipes.map(p=>[p.id,{D:p.D,W:p.W,u:p.invUp,d:p.invDn,code:p.code,st:(p.st||[]).map(t=>t.code)}]));
@@ -859,12 +875,18 @@ function autoAll(pipes,crit,rain,cat,opt){
       const sl=autoSlope(pipes,crit,rain,opt.slope);
       sl.changes.forEach(c=>{const p=byId.get(c.id);p.invUp=c.u1;p.invDn=c.d1;c.why.forEach(t=>note(c.id,t));});
       const hi=sl.remain.filter(r=>/ > /.test(r.txt)).map(r=>r.id).filter(id=>!stuckV.has(id));
-      if(hi.length){force=hi;continue;}
+      if(hi.length&&opt.noDrop)hi.forEach(id=>stuckV.set(id,'단차 없이는 구배를 못 줄임 — 지형 경사가 큼(관경을 키워도 해결 안 됨, 단차 허용 필요)'));
+      else if(hi.length){force=hi;continue;}
       const cv=autoCover(pipes,crit,rain,opt.cover);
       cv.changes.forEach(c=>{const p=byId.get(c.id);p.invUp=c.u1;p.invDn=c.d1;if((p.code||'')!==c.code1){p.code=c.code1;(p.st||[]).forEach(t=>{t.code=c.code1;});}c.why.forEach(t=>note(c.id,t));});
+      if(opt.noDrop)closeDrops(pipes,crit,rain,vmin,vmax,vlow,orig,note);
       const s2=sig();if(s2===last)break;last=s2;
       const res=compute(pipes,crit,rain);
       if(!pipes.some(p=>{const r=res.get(p.id);if(r.joint)return true;if(r.pump)return false;const v=vj(r);return r.S<=0||(r.Q>0&&!r.marginOK)||v<vlow-1e-9||(v>vmax+1e-9&&!stuckV.has(p.id));}))break;
+    }
+    if(opt.noDrop){   // 단차를 없애면 토피가 달라질 수 있어 보호공만 다시 정리
+      const rs=compute(pipes,crit,rain);
+      pipes.forEach(p=>{const r=rs.get(p.id);if(r.pump)return;const c=isBox(p)?(crit.coverBox??crit.cover):crit.cover;if(r.cmin<c-0.0005&&!isProt(p.code)){const base=codeBase(p.code)||PT.defCode;p.code=base+'-B';(p.st||[]).forEach(t=>{t.code=p.code;});note(p.id,`단차 제거 후 토피 ${r.cmin.toFixed(2)} m < ${c.toFixed(2)} m → 관보호공(-B)`);}});
     }
     const a1=stat(),after=a1.o,fin=a1.res;
     const secS=(o,p)=>+p.W>0?`□${(+o.W).toFixed(2)}×${(+o.D).toFixed(2)}`:`D${o.D}`;
@@ -874,7 +896,8 @@ function autoAll(pipes,crit,rain,cat,opt){
       if(r.obsHits.length)t.push('지장물 무시: '+r.obsHits.map(h=>`${h.name} ${h.gap.toFixed(2)} m`).join(', '));if(t.length)remain.push({id:p.id,txt:t.join(' · ')+(stuckV.has(p.id)?` (${stuckV.get(p.id)})`:'')});});
     const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
     const dropOf=p=>{const outs=byUp.get(p.dn)||[];return outs.length?p.invDn-Math.min(...outs.map(q=>q.invUp)):0;};
-    return{changes,before,after,remain,rounds:rounds+1,maxDeep:Math.max(0,...pipes.map(p=>orig.get(p.id).d-p.invDn)),drops06:pipes.filter(p=>dropOf(p)>0.6+1e-9).length,drops15:pipes.filter(p=>dropOf(p)>1.5+1e-9).length};
+    const nodeDrops=pipes.filter(p=>dropOf(p)>0.0005).length;
+    return{changes,before,after,remain,nodeDrops,rounds:rounds+1,maxDeep:Math.max(0,...pipes.map(p=>orig.get(p.id).d-p.invDn)),drops06:pipes.filter(p=>dropOf(p)>0.6+1e-9).length,drops15:pipes.filter(p=>dropOf(p)>1.5+1e-9).length};
   }finally{restore();}
 }
 function slopeForV(p,Q,target){
@@ -1680,18 +1703,19 @@ function runAll(){
   const storm=!!(doc.rain&&doc.rain.type1>1),num=(id,d)=>{const v=$(id).value;return v!==''&&isFinite(+v)?+v:d;};
   const opt={slope:{improve:$('#aImp').checked,vlow:num('#aVlow',storm?0.6:crit.vlow),deepen:num('#aDeep',0.5),cover:num('#aCover',0.4)},
     cover:{vlow:storm?0.6:crit.vlow,hard:num('#cHard',0.4),deepen:num('#cDeep',0),obs:num('#cObs',0.5)}};
+  opt.noDrop=$('#aNoDrop').checked;opt.slope.noDrop=opt.noDrop;
   allPlan=autoAll(pipes,crit,doc.rain,catalog,opt);const a=allPlan;
   const d=(x,y,f)=>x===y?f(y):`${f(x)}→<b>${f(y)}</b>`,id=v=>esc(String(v||'-'));
   const rows=a.changes.map(c=>`<tr><td class="l">${esc(c.id)}</td><td>${d(c.sec0,c.sec1,id)}</td><td>${d(f2(c.u0),f2(c.u1),id)}</td><td>${d(f2(c.d0),f2(c.d1),id)}</td><td>${d(c.S0.toFixed(1),c.S1.toFixed(1),id)}</td><td>${d(c.v0.toFixed(2),c.v1.toFixed(2),id)}</td><td>${d(f2(c.c0),f2(c.c1),id)}</td><td>${d(c.code0,c.code1,id)}</td><td class="l">${esc(c.why.join(' / '))}</td></tr>`).join('');
   const st=o=>`역구배 ${o.adverse} · 통수능NG ${o.ng} · 유속 하한미만 ${o.low} · 유속초과 ${o.high} · 유지관리 ${o.maint} · 접합NG ${o.joint} · 토피부족 ${o.cover} · 보호공 ${o.prot} · 지장물 근접 ${o.obs} · 부등류 NG ${isFinite(o.gvf)?o.gvf:'?'}`;
-  $('#allBody').innerHTML=`<div class="hint">변경 ${a.changes.length}개 · 반복 ${a.rounds}회 · 가장 많이 깊어진 관저 ${a.maxDeep.toFixed(2)} m · 단차 0.6 m 초과 맨홀 ${a.drops06} (1.5 m 초과 ${a.drops15})</div><div class="hint">조정 전: ${st(a.before)}</div><div class="hint">조정 후: ${st(a.after)}</div>`+
+  $('#allBody').innerHTML=`<div class="hint">변경 ${a.changes.length}개 · 반복 ${a.rounds}회 · 가장 많이 깊어진 관저 ${a.maxDeep.toFixed(2)} m · 단차 있는 맨홀 ${a.nodeDrops} · 0.6 m 초과 ${a.drops06} (1.5 m 초과 ${a.drops15})</div><div class="hint">조정 전: ${st(a.before)}</div><div class="hint">조정 후: ${st(a.after)}</div>`+
     (a.after.gvf>0?`<div class="hint" style="color:var(--bad)">조정 후에도 부등류(표준축차)로 보면 NG인 관로가 ${a.after.gvf}개 있습니다. 적용 후 [부등류]로 바꿔 확인하세요.</div>`:'')+
     (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>단면</th><th>상류 관저</th><th>하류 관저</th><th>경사‰</th><th>유속</th><th>토피</th><th>공법</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다 (적용할 내용 없음).</div>')+
     (a.remain.length?`<div class="hint" style="margin-top:6px">⚠ 조정 후에도 남는 항목 ${a.remain.length}개 관로: ${a.remain.map(r=>'<br>'+esc(r.id)+' — '+esc(r.txt)).join('')}</div>`:'');
   $('#bAllApply').disabled=!a.changes.length;
 }
 $('#bAutoAll').onclick=()=>{runAll();$('#allDlg').hidden=false;};
-$('#bAllRun').onclick=runAll;
+$('#bAllRun').onclick=runAll;$('#aNoDrop').onchange=runAll;
 $('#bAllClose').onclick=()=>{$('#allDlg').hidden=true;};
 $('#bAllApply').onclick=()=>{if(!allPlan||!allPlan.changes.length)return;const ch=allPlan.changes;
   edit(()=>{ch.forEach(c=>{const p=P(c.id);p.D=c.D1;p.W=c.W1;p.invUp=c.u1;p.invDn=c.d1;if((p.code||'')!==c.code1){p.code=c.code1;(p.st||[]).forEach(t=>{t.code=c.code1;});}});});$('#allDlg').hidden=true;toast(`전체 자동 조정 ${ch.length}개 관로 (Ctrl+Z로 되돌리기)`);};
