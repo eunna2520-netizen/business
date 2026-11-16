@@ -226,6 +226,12 @@ button,.tab{touch-action:manipulation}
     <div class="btns"><button id="bCoverRun">다시 계산</button><button id="bCoverApply" class="on">적용</button><button id="bCoverClose">닫기</button></div>
   </div>
 
+  <div class="dlg" id="allDlg" hidden>
+    <div class="bar"><strong>전체 자동 조정</strong><span class="sub">우선순위 <b>역구배 &gt; 통수능 &gt; 유속 &gt; 토피 &gt; 지장물</b> 순서로 관경과 관저고를 함께 조정합니다. 통수능 부족은 관경 상향, 유속은 구배(관저고)와 맨홀 단차, 구배로 못 잡는 최대유속 초과는 관경을 더 키워 다시 계산, 토피 부족은 관보호공(-B), 못 피한 지장물은 무시하고 표시합니다. 세부 옵션은 각 단계 대화상자의 값을 씁니다.</span></div>
+    <div id="allBody" style="max-height:340px;overflow:auto"></div>
+    <div class="btns"><button id="bAllRun">다시 계산</button><button id="bAllApply" class="on">적용</button><button id="bAllClose">닫기</button></div>
+  </div>
+
   <div class="grid">
     <div class="col">
       <div class="card plan-card">
@@ -239,6 +245,7 @@ button,.tab{touch-action:manipulation}
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
+          <button id="bAutoAll" class="on" title="통수능·유속·토피·지장물을 우선순위대로 한 번에 조정하는 제안 (적용 전에 미리보기)">전체 자동 조정</button>
           <button id="bAuto3" title="접합 정리, 최소 토피 확보, 지장물 회피, 토피 부족 시 관보호공 처리 제안 (적용 전에 미리보기)">토피·지장물 자동 조정</button>
           <button id="bAuto2" title="역구배·유속 부족/초과 관로의 관저고(구배)를 자동 조정하는 제안 (적용 전에 미리보기)">유속·구배 자동 조정</button>
           <button id="bAuto" title="통수능이 부족한 관로의 관경을 규격 목록에서 자동으로 키우는 제안 (적용 전에 미리보기)">통수능 자동 조정</button>
@@ -664,7 +671,7 @@ const catalog={circ:[150,200,250,300,350,400,450,500,600,700,800,900,1000,1100,1
 const areaOf=p=>(isBox(p)?(+p.W)*(+p.D):Math.PI*Math.pow((+p.D)/1000,2)/4)*Math.max(1,+p.nb||1);
 // 통수능(여유율) 부족 관로를 규격 목록에서 한 단계씩 키움. 줄이지 않고, 상류 단면 ≤ 하류 단면 유지. 관저고는 그대로.
 // pipes를 임시로 바꿔 계산한 뒤 원래대로 돌려놓고 제안만 반환
-function autoUpsize(pipes,crit,rain,cat){
+function autoUpsize(pipes,crit,rain,cat,force=[]){
   const orig=new Map(pipes.map(p=>[p.id,{D:p.D,W:p.W}]));
   const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
   const dep=new Map(),depth=(p,st=new Set())=>{if(dep.has(p.id))return dep.get(p.id);if(st.has(p.id))return 0;st.add(p.id);let d=0;(byDn.get(p.up)||[]).forEach(q=>{d=Math.max(d,depth(q,st));});st.delete(p.id);dep.set(p.id,d+1);return d+1;};
@@ -683,6 +690,7 @@ function autoUpsize(pipes,crit,rain,cat){
   let it=0,after=null;
   for(;it<60;it++){
     const res=compute(pipes,crit,rain);let ch=false;
+    if(it===0)force.forEach(id=>{const p=pipes.find(q=>q.id===id);if(!p)return;if(bump(p,0)){note(id,'최대유속 초과(구배로 해결 불가) → 관경 상향');ch=true;}else stuck.set(id,'최대유속 초과 — 규격 목록의 최대 크기');});
     for(const p of order){
       const r=res.get(p.id);if(r.pump||!(r.Q>0)||r.marginOK)continue;
       if(!(r.S>0)){stuck.set(p.id,'역구배 — 관경으로 해결 불가');continue;}
@@ -712,20 +720,26 @@ function fitInvDn(p,r,crit,opt,vmin,vmax,vlow,o){
   if(Q>0){const cap=S=>{const c=Object.assign({},p,{invDn:p.invUp-S*L});const u=hydOf(c,Q);return allowAt(c,S,n,u).Q*nb;};
     const need=Q*(1+(r.margin||0));if(cap(0.5)>=need){let lo=1e-5,hi=0.5;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(cap(m)<need)lo=m;else hi=m;}Scap=Math.max(Scap,hi);}}
   const vCur=S0>0?vOf(S0):0,cascade=(o.u-o.d)>0&&S0<=0;
-  let S=S0,tag='';
+  let S=S0,tag='',Sneed=0,SvOK=true,changed=false;
   if(S0<=0){S=Math.max(slopeFor(vlow+0.01),Scap);tag=cascade?'상류 관저가 내려가 구배 소멸 → 하류 관저 하강':'역구배 해소';}
   else if(vCur<vlow-1e-9){S=Math.max(slopeFor(vlow+0.01),Scap,S0);tag='유속 부족(허용 하한 미만)';}
   else if(opt.floor&&vCur<opt.floor-1e-9){S=Math.max(slopeFor(opt.floor+0.003),Scap,S0);tag='유속 유지(하류 관저 하강으로 흡수 불가)';}
   else if(opt.improve&&vCur<vmin-1e-9){const want=Math.max(slopeFor(vmin+0.005),Scap,S0),room=S0+(+opt.deepen)/L;S=Math.min(want,Math.max(room,Scap));if(S>S0+1e-9)tag='유지관리 유속 개선 (최대 추가 굴착 '+(+opt.deepen)+' m 이내)';}
-  else if(vCur>vmax+1e-9){const Sv=slopeFor(vmax-0.005),Sc=(p.invUp-(p.ghDn-secH(p)-(+opt.cover)))/L;S=Math.min(S0,Math.max(Sv,Scap,Sc));if(S<S0-1e-9)tag='유속 초과 → 구배 완화(하류 단차로 흡수)';}
+  else if(vCur>vmax+1e-9){const Sv=slopeFor(vmax-0.005),Sc=(p.invUp-(p.ghDn-secH(p)-(+opt.cover)))/L;S=Math.min(S0,Math.max(Sv,Scap,Sc));if(S<S0-1e-9)tag='유속 초과 → 구배 완화(하류 단차로 흡수)';Sneed=Math.max(Sv,Scap,1e-4);SvOK=Sv>=Scap;}
   if(S<Scap-1e-9&&Q>0){S=Math.max(S,Scap);tag=tag||'통수능 확보';}
   S=Math.max(S,1e-4);
   if(Math.abs(S-S0)>1e-9){
     const raw=p.invUp-S*L;p.invDn=+(S>S0?Math.floor(raw*100)/100:Math.ceil(raw*100)/100).toFixed(2);
     if(p.invDn>=p.invUp)p.invDn=+(p.invUp-0.01).toFixed(2);
-    return tag||'구배 조정';
+    changed=true;tag=tag||'구배 조정';
   }
-  return '';
+  // 최대유속 초과인데 하류단을 올리는 것만으로 부족하면(토피 한도) 상류단을 내려 상류 맨홀 단차로 흡수
+  if(opt.dropUp&&Sneed>0&&(p.invUp-p.invDn)/L>Sneed+1e-9){
+    const raw=p.invDn+Sneed*L;let nu=SvOK?Math.floor(raw*100+1e-9)/100:Math.ceil(raw*100-1e-9)/100;
+    nu=Math.max(nu,opt.upLimit??-Infinity);
+    if(nu<p.invUp-0.0005&&nu>p.invDn+0.0005){p.invUp=+nu.toFixed(2);changed=true;tag='유속 초과 → 구배 완화(상류 맨홀 단차로 흡수)';}
+  }
+  return changed?tag:'';
 }
 // 유속·구배 자동 조정: 역구배 해소 > 통수능 유지 > 유속. 관경은 그대로, 관저고만 상류→하류 순서로 다시 정함.
 function autoSlope(pipes,crit,rain,opt){
@@ -748,7 +762,7 @@ function autoSlope(pipes,crit,rain,opt){
       const inc=byDn.get(p.up)||[];
       p.invUp=+(inc.length?Math.min(o.u,...inc.map(q=>q.invDn)):o.u).toFixed(2);
       p.invDn=o.d;
-      const tg=fitInvDn(p,r,crit,opt,vmin,vmax,vlow,o);if(tg)note(p.id,tg);
+      const md=opt.maxDrop??1.5,tg=fitInvDn(p,r,crit,Object.assign({},opt,{dropUp:opt.dropUp!==false,upLimit:(inc.length?Math.min(...inc.map(q=>q.invDn)):o.u)-md}),vmin,vmax,vlow,o);if(tg)note(p.id,tg);
       if(Math.abs(p.invUp-o.u)>0.0005&&!why.get(p.id))note(p.id,'상류 관저 하강에 따라 이동');
     }
     Qm=compute(pipes,crit,rain);
@@ -820,6 +834,48 @@ function autoCover(pipes,crit,rain,opt){
   const drops06=pipes.filter(p=>dropOf(p)>0.6+1e-9).length,drops15=pipes.filter(p=>dropOf(p)>1.5+1e-9).length;
   restore();
   return{changes,before,after,maxDeep,drops06,drops15,ignored};
+}
+
+// 전체 자동 조정: 통수능(관경) → 유속·구배 → (유속 초과가 남으면 관경 더 키워 반복) → 토피·지장물·접합. 원본은 복원하고 제안만 반환
+function autoAll(pipes,crit,rain,cat,opt){
+  const snap=()=>new Map(pipes.map(p=>[p.id,{D:p.D,W:p.W,u:p.invUp,d:p.invDn,code:p.code,st:(p.st||[]).map(t=>t.code)}]));
+  const orig=snap(),byId=new Map(pipes.map(p=>[p.id,p]));
+  const restore=()=>pipes.forEach(p=>{const o=orig.get(p.id);p.D=o.D;p.W=o.W;p.invUp=o.u;p.invDn=o.d;p.code=o.code;(p.st||[]).forEach((t,i)=>{t.code=o.st[i];});});
+  const why=new Map(),note=(id,t)=>{const a=why.get(id)||[];if(t&&!a.includes(t))a.push(t);why.set(id,a);};
+  const vmin=+crit.vmin,vmax=+crit.vmax,vlow=Math.min(+opt.slope.vlow,vmin),vj=r=>r.Q>0?r.V:r.Vfull;
+  const stat=()=>{const res=compute(pipes,crit,rain),o={adverse:0,low:0,maint:0,high:0,ng:0,joint:0,cover:0,prot:0,obs:0,gvf:0};
+    pipes.forEach(p=>{const r=res.get(p.id);if(r.joint)o.joint++;if(r.coverNG)o.cover++;if(r.coverProt)o.prot++;if(r.obsHits.length)o.obs++;if(r.pump)return;
+      if(r.S<=0)o.adverse++;else{const v=vj(r);if(v<vlow-1e-9)o.low++;else if(v<vmin-1e-9)o.maint++;else if(v>vmax+1e-9)o.high++;}if(r.Q>0&&!r.marginOK&&r.S>0)o.ng++;});
+    try{const rg=compute(pipes,Object.assign({},crit,{gvf:true}),rain);pipes.forEach(p=>{const g=rg.get(p.id).g;if(g&&g.label!=='GOOD')o.gvf++;});}catch(e){o.gvf=NaN;}
+    return{o,res};};
+  const b0=stat(),before=b0.o,info0=new Map(pipes.map(p=>{const r=b0.res.get(p.id);return[p.id,{v:vj(r),c:r.cmin}];}));
+  const sig=()=>pipes.map(p=>[p.D,p.W,p.invUp,p.invDn,p.code].join('/')).join('|');
+  const stuckV=new Map();let force=[],rounds=0,last='';
+  try{
+    for(;rounds<12;rounds++){
+      const up=autoUpsize(pipes,crit,rain,cat,force);
+      up.changes.forEach(c=>{const p=byId.get(c.id);p.D=c.to.D;p.W=c.to.W;c.why.forEach(t=>note(c.id,t));});
+      up.stuck.forEach(([id,t])=>stuckV.set(id,t));force=[];
+      const sl=autoSlope(pipes,crit,rain,opt.slope);
+      sl.changes.forEach(c=>{const p=byId.get(c.id);p.invUp=c.u1;p.invDn=c.d1;c.why.forEach(t=>note(c.id,t));});
+      const hi=sl.remain.filter(r=>/ > /.test(r.txt)).map(r=>r.id).filter(id=>!stuckV.has(id));
+      if(hi.length){force=hi;continue;}
+      const cv=autoCover(pipes,crit,rain,opt.cover);
+      cv.changes.forEach(c=>{const p=byId.get(c.id);p.invUp=c.u1;p.invDn=c.d1;if((p.code||'')!==c.code1){p.code=c.code1;(p.st||[]).forEach(t=>{t.code=c.code1;});}c.why.forEach(t=>note(c.id,t));});
+      const s2=sig();if(s2===last)break;last=s2;
+      const res=compute(pipes,crit,rain);
+      if(!pipes.some(p=>{const r=res.get(p.id);if(r.joint)return true;if(r.pump)return false;const v=vj(r);return r.S<=0||(r.Q>0&&!r.marginOK)||v<vlow-1e-9||(v>vmax+1e-9&&!stuckV.has(p.id));}))break;
+    }
+    const a1=stat(),after=a1.o,fin=a1.res;
+    const secS=(o,p)=>+p.W>0?`□${(+o.W).toFixed(2)}×${(+o.D).toFixed(2)}`:`D${o.D}`;
+    const changes=pipes.filter(p=>{const o=orig.get(p.id);return o.D!==p.D||o.W!==p.W||Math.abs(p.invUp-o.u)>0.0005||Math.abs(p.invDn-o.d)>0.0005||(p.code||'')!==(o.code||'');}).map(p=>{const o=orig.get(p.id),r=fin.get(p.id),i0=info0.get(p.id);
+      return{id:p.id,D1:p.D,W1:p.W,u1:p.invUp,d1:p.invDn,code1:p.code||'',sec0:secS(o,p),sec1:secS(p,p),u0:o.u,d0:o.d,code0:o.code||'',S0:(o.u-o.d)/p.L*1000,S1:(p.invUp-p.invDn)/p.L*1000,v0:i0.v,v1:vj(r),c0:i0.c,c1:r.cmin,why:why.get(p.id)||[]};});
+    const remain=[];pipes.forEach(p=>{const r=fin.get(p.id),t=[];if(r.joint)t.push('접합 역류');if(!r.pump){const v=vj(r);if(r.S<=0)t.push('역구배');else{if(r.Q>0&&!r.marginOK)t.push('통수능 부족');if(v<vlow-1e-9)t.push(`유속 ${v.toFixed(2)} < ${vlow}`);if(v>vmax+1e-9)t.push(`유속 ${v.toFixed(2)} > ${vmax}`);}}
+      if(r.obsHits.length)t.push('지장물 무시: '+r.obsHits.map(h=>`${h.name} ${h.gap.toFixed(2)} m`).join(', '));if(t.length)remain.push({id:p.id,txt:t.join(' · ')+(stuckV.has(p.id)?` (${stuckV.get(p.id)})`:'')});});
+    const byUp=new Map();pipes.forEach(p=>{if(!byUp.has(p.up))byUp.set(p.up,[]);byUp.get(p.up).push(p);});
+    const dropOf=p=>{const outs=byUp.get(p.dn)||[];return outs.length?p.invDn-Math.min(...outs.map(q=>q.invUp)):0;};
+    return{changes,before,after,remain,rounds:rounds+1,maxDeep:Math.max(0,...pipes.map(p=>orig.get(p.id).d-p.invDn)),drops06:pipes.filter(p=>dropOf(p)>0.6+1e-9).length,drops15:pipes.filter(p=>dropOf(p)>1.5+1e-9).length};
+  }finally{restore();}
 }
 function slopeForV(p,Q,target){
   const nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
@@ -1617,6 +1673,28 @@ $('#bCoverRun').onclick=runCover;
 $('#bCoverClose').onclick=()=>{$('#coverDlg').hidden=true;};
 $('#bCoverApply').onclick=()=>{if(!coverPlan||!coverPlan.changes.length)return;const ch=coverPlan.changes;
   edit(()=>{ch.forEach(c=>{const p=P(c.id);p.invUp=c.u1;p.invDn=c.d1;if((p.code||'')!==c.code1){p.code=c.code1;(p.st||[]).forEach(t=>{t.code=c.code1;});}});});$('#coverDlg').hidden=true;toast(`토피·지장물 조정 ${ch.length}개 관로 (Ctrl+Z로 되돌리기)`);};
+
+/* ---------- 전체 자동 조정 ---------- */
+let allPlan=null;
+function runAll(){
+  const storm=!!(doc.rain&&doc.rain.type1>1),num=(id,d)=>{const v=$(id).value;return v!==''&&isFinite(+v)?+v:d;};
+  const opt={slope:{improve:$('#aImp').checked,vlow:num('#aVlow',storm?0.6:crit.vlow),deepen:num('#aDeep',0.5),cover:num('#aCover',0.4)},
+    cover:{vlow:storm?0.6:crit.vlow,hard:num('#cHard',0.4),deepen:num('#cDeep',0),obs:num('#cObs',0.5)}};
+  allPlan=autoAll(pipes,crit,doc.rain,catalog,opt);const a=allPlan;
+  const d=(x,y,f)=>x===y?f(y):`${f(x)}→<b>${f(y)}</b>`,id=v=>esc(String(v||'-'));
+  const rows=a.changes.map(c=>`<tr><td class="l">${esc(c.id)}</td><td>${d(c.sec0,c.sec1,id)}</td><td>${d(f2(c.u0),f2(c.u1),id)}</td><td>${d(f2(c.d0),f2(c.d1),id)}</td><td>${d(c.S0.toFixed(1),c.S1.toFixed(1),id)}</td><td>${d(c.v0.toFixed(2),c.v1.toFixed(2),id)}</td><td>${d(f2(c.c0),f2(c.c1),id)}</td><td>${d(c.code0,c.code1,id)}</td><td class="l">${esc(c.why.join(' / '))}</td></tr>`).join('');
+  const st=o=>`역구배 ${o.adverse} · 통수능NG ${o.ng} · 유속 하한미만 ${o.low} · 유속초과 ${o.high} · 유지관리 ${o.maint} · 접합NG ${o.joint} · 토피부족 ${o.cover} · 보호공 ${o.prot} · 지장물 근접 ${o.obs} · 부등류 NG ${isFinite(o.gvf)?o.gvf:'?'}`;
+  $('#allBody').innerHTML=`<div class="hint">변경 ${a.changes.length}개 · 반복 ${a.rounds}회 · 가장 많이 깊어진 관저 ${a.maxDeep.toFixed(2)} m · 단차 0.6 m 초과 맨홀 ${a.drops06} (1.5 m 초과 ${a.drops15})</div><div class="hint">조정 전: ${st(a.before)}</div><div class="hint">조정 후: ${st(a.after)}</div>`+
+    (a.after.gvf>0?`<div class="hint" style="color:var(--bad)">조정 후에도 부등류(표준축차)로 보면 NG인 관로가 ${a.after.gvf}개 있습니다. 적용 후 [부등류]로 바꿔 확인하세요.</div>`:'')+
+    (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>단면</th><th>상류 관저</th><th>하류 관저</th><th>경사‰</th><th>유속</th><th>토피</th><th>공법</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다 (적용할 내용 없음).</div>')+
+    (a.remain.length?`<div class="hint" style="margin-top:6px">⚠ 조정 후에도 남는 항목 ${a.remain.length}개 관로: ${a.remain.map(r=>'<br>'+esc(r.id)+' — '+esc(r.txt)).join('')}</div>`:'');
+  $('#bAllApply').disabled=!a.changes.length;
+}
+$('#bAutoAll').onclick=()=>{runAll();$('#allDlg').hidden=false;};
+$('#bAllRun').onclick=runAll;
+$('#bAllClose').onclick=()=>{$('#allDlg').hidden=true;};
+$('#bAllApply').onclick=()=>{if(!allPlan||!allPlan.changes.length)return;const ch=allPlan.changes;
+  edit(()=>{ch.forEach(c=>{const p=P(c.id);p.D=c.D1;p.W=c.W1;p.invUp=c.u1;p.invDn=c.d1;if((p.code||'')!==c.code1){p.code=c.code1;(p.st||[]).forEach(t=>{t.code=c.code1;});}});});$('#allDlg').hidden=true;toast(`전체 자동 조정 ${ch.length}개 관로 (Ctrl+Z로 되돌리기)`);};
 const stepD=k=>{const p=P(ui.sel);
   if(isBox(p)){   // 폭과 높이를 같이 0.1 m씩 (폭·높이는 표에서 직접 입력도 가능)
     const H=Math.max(0.3,+(+p.D+0.1*k).toFixed(2)),W=Math.max(0.3,+(+p.W+0.1*k).toFixed(2));edit(()=>{p.D=H;p.W=W;});return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
