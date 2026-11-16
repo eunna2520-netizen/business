@@ -203,6 +203,18 @@ button,.tab{touch-action:manipulation}
     <div class="btns"><button id="bAutoRun">다시 계산</button><button id="bAutoApply" class="on">적용</button><button id="bAutoClose">닫기</button></div>
   </div>
 
+  <div class="dlg" id="slopeDlg" hidden>
+    <div class="bar"><strong>유속·구배 자동 조정</strong><span class="sub">역구배 해소 → 통수능 유지 → 유속(허용 범위) 순서로 관저고(구배)를 조정합니다. 관경은 바꾸지 않습니다(먼저 통수능 자동 조정). 지장물 이격은 이 단계에서 반영하지 않습니다.</span></div>
+    <div class="hint" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+      <label>허용 하한 유속 <input id="aVlow" type="number" step="0.05" style="width:62px"> m/s</label>
+      <label title="하한 이상이지만 최소유속(오수 0.6) 미만인 '유지관리' 관로도 구배를 키워 개선 (관저가 깊어짐)"><input id="aImp" type="checkbox"> 유지관리 구간도 개선</label>
+      <label>관로당 최대 추가 굴착 <input id="aDeep" type="number" step="0.1" value="0.5" style="width:62px"> m</label>
+      <label>유속 낮추기 시 최소 토피 <input id="aCover" type="number" step="0.1" value="0.4" style="width:62px"> m</label>
+    </div>
+    <div id="slopeBody" style="max-height:320px;overflow:auto"></div>
+    <div class="btns"><button id="bSlopeRun">다시 계산</button><button id="bSlopeApply" class="on">적용</button><button id="bSlopeClose">닫기</button></div>
+  </div>
+
   <div class="grid">
     <div class="col">
       <div class="card plan-card">
@@ -216,6 +228,7 @@ button,.tab{touch-action:manipulation}
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
+          <button id="bAuto2" title="역구배·유속 부족/초과 관로의 관저고(구배)를 자동 조정하는 제안 (적용 전에 미리보기)">유속·구배 자동 조정</button>
           <button id="bAuto" title="통수능이 부족한 관로의 관경을 규격 목록에서 자동으로 키우는 제안 (적용 전에 미리보기)">통수능 자동 조정</button>
           <button id="bRange" title="누른 뒤 종단에서 시작·끝 맨홀 두 개를 클릭(탭)하면 그 사이 관저를 한 경사로 일직선 정리. 데스크톱은 Shift+클릭 두 번도 가능">구간 일직선</button>
           <div class="seg" role="group" aria-label="수면 계산"><button id="wU" class="on" title="관로마다 등류(Manning) 수심">등류</button><button id="wG" title="방류구 수위에서 상류로 표준축차법 수면곡선">부등류</button></div>
@@ -676,6 +689,60 @@ function autoUpsize(pipes,crit,rain,cat){
   pipes.forEach(p=>{const o=orig.get(p.id);p.D=o.D;p.W=o.W;});
   const before=compute(pipes,crit,rain);
   return{changes,ngNow,stuck:[...stuck].filter(([id])=>ngNow.includes(id)||true),iter:it,coverBefore:pipes.filter(p=>before.get(p.id).coverNG).length,coverAfter:coverNow,ngBefore:pipes.filter(p=>{const r=before.get(p.id);return !r.pump&&r.Q>0&&!r.marginOK;}).length};
+}
+
+// 유속·구배 자동 조정: 역구배 해소 > 통수능 유지 > 유속. 관경은 그대로, 관저고만 상류→하류 순서로 다시 정함.
+function autoSlope(pipes,crit,rain,opt){
+  const orig=new Map(pipes.map(p=>[p.id,{u:p.invUp,d:p.invDn}]));
+  const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
+  const dep=new Map(),depth=(p,st=new Set())=>{if(dep.has(p.id))return dep.get(p.id);if(st.has(p.id))return 0;st.add(p.id);let d=0;(byDn.get(p.up)||[]).forEach(q=>{d=Math.max(d,depth(q,st));});st.delete(p.id);dep.set(p.id,d+1);return d+1;};
+  const order=[...pipes].sort((a,b)=>depth(a)-depth(b));
+  const vmin=+crit.vmin,vmax=+crit.vmax,vlow=Math.min(+opt.vlow,vmin);
+  const restore=()=>pipes.forEach(p=>{const o=orig.get(p.id);p.invUp=o.u;p.invDn=o.d;});
+  const vj=r=>r.Q>0?r.V:r.Vfull;
+  const stat=res=>{const o={adverse:0,low:0,maint:0,high:0,ng:0,joint:0};pipes.forEach(p=>{const r=res.get(p.id);if(r.pump)return;if(r.S<=0)o.adverse++;else{const v=vj(r);if(v<vlow-1e-9)o.low++;else if(v<vmin-1e-9)o.maint++;else if(v>vmax+1e-9)o.high++;}if(r.Q>0&&!r.marginOK&&r.S>0)o.ng++;if(r.joint)o.joint++;});return o;};
+  const before=stat(compute(pipes,crit,rain)),vBefore=new Map();{const r0=compute(pipes,crit,rain);pipes.forEach(p=>vBefore.set(p.id,vj(r0.get(p.id))));}
+  let Qm=compute(pipes,crit,rain),why=new Map(),flags=new Map();
+  for(let pass=0;pass<6;pass++){
+    restore();why=new Map();flags=new Map();
+    const note=(id,t)=>{const a=why.get(id)||[];if(!a.includes(t))a.push(t);why.set(id,a);};
+    const prev=new Map(pipes.map(p=>[p.id,[p.invUp,p.invDn]]));
+    for(const p of order){
+      const o=orig.get(p.id),r=Qm.get(p.id);if(isPump(p)){continue;}
+      const inc=byDn.get(p.up)||[];
+      p.invUp=+(inc.length?Math.min(o.u,...inc.map(q=>q.invDn)):o.u).toFixed(2);
+      p.invDn=o.d;
+      const L=p.L,nb=Math.max(1,+p.nb||1),n=+p.n||0.013,Q=r.Q,S0=(p.invUp-p.invDn)/L;
+      const vOf=S=>Q>0?flowSec(p,Q/nb,S,n).V:flowSec(p,0,S,n).Vfull;
+      const slopeFor=t=>{let lo=1e-5,hi=0.5;if(vOf(hi)<t)return hi;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(vOf(m)<t)lo=m;else hi=m;}return hi;};
+      let Scap=1e-4;
+      if(Q>0){const cap=S=>{const c=Object.assign({},p,{invDn:p.invUp-S*L});const u=hydOf(c,Q);return allowAt(c,S,n,u).Q*nb;};
+        const need=Q*(1+(r.margin||0));if(cap(0.5)>=need){let lo=1e-5,hi=0.5;for(let i=0;i<60;i++){const m=(lo+hi)/2;if(cap(m)<need)lo=m;else hi=m;}Scap=Math.max(Scap,hi);}}
+      const vCur=S0>0?vOf(S0):0,cascade=(o.u-o.d)>0&&S0<=0;
+      let S=S0,tag='';
+      if(S0<=0){S=Math.max(slopeFor(vlow+0.01),Scap);tag=cascade?'상류 관저가 내려가 구배 소멸 → 하류 관저 하강':'역구배 해소';}
+      else if(vCur<vlow-1e-9){S=Math.max(slopeFor(vlow+0.01),Scap,S0);tag='유속 부족(허용 하한 미만)';}
+      else if(opt.improve&&vCur<vmin-1e-9){const want=Math.max(slopeFor(vmin+0.005),Scap,S0),room=S0+(+opt.deepen)/L;S=Math.min(want,Math.max(room,Scap));if(S>S0+1e-9)tag='유지관리 유속 개선 (최대 추가 굴착 '+(+opt.deepen)+' m 이내)';}
+      else if(vCur>vmax+1e-9){const Sv=slopeFor(vmax-0.005),Sc=(p.invUp-(p.ghDn-secH(p)-(+opt.cover)))/L;S=Math.min(S0,Math.max(Sv,Scap,Sc));if(S<S0-1e-9)tag='유속 초과 → 구배 완화(하류 단차로 흡수)';}
+      if(S<Scap-1e-9&&Q>0){S=Math.max(S,Scap);tag=tag||'통수능 확보';}
+      S=Math.max(S,1e-4);
+      if(Math.abs(S-S0)>1e-9){
+        const raw=p.invUp-S*L;p.invDn=+(S>S0?Math.floor(raw*100)/100:Math.ceil(raw*100)/100).toFixed(2);
+        if(p.invDn>=p.invUp)p.invDn=+(p.invUp-0.01).toFixed(2);
+        note(p.id,tag);
+      }
+      if(Math.abs(p.invUp-o.u)>0.0005&&!why.get(p.id))note(p.id,'상류 관저 하강에 따라 이동');
+    }
+    Qm=compute(pipes,crit,rain);
+    if(pipes.every(p=>prev.get(p.id)[0]===p.invUp&&prev.get(p.id)[1]===p.invDn))break;
+  }
+  const fin=compute(pipes,crit,rain),after=stat(fin);
+  const changes=pipes.filter(p=>{const o=orig.get(p.id);return Math.abs(p.invUp-o.u)>0.0005||Math.abs(p.invDn-o.d)>0.0005;}).map(p=>{const o=orig.get(p.id),r=fin.get(p.id);return{id:p.id,u0:o.u,d0:o.d,u1:p.invUp,d1:p.invDn,S0:(o.u-o.d)/p.L*1000,S1:(p.invUp-p.invDn)/p.L*1000,v0:vBefore.get(p.id),v1:vj(r),why:why.get(p.id)||[]};});
+  const maxDeep=Math.max(0,...pipes.map(p=>orig.get(p.id).d-p.invDn));
+  const drops=pipes.filter(p=>{const outs=pipes.filter(q=>q.up===p.dn);return outs.length&&p.invDn-Math.min(...outs.map(q=>q.invUp))>0.6+1e-9;}).length;
+  const remain=pipes.filter(p=>{const r=fin.get(p.id);if(r.pump)return false;const v=vj(r);return r.S<=0||v<vlow-1e-9||v>vmax+1e-9;}).map(p=>{const r=fin.get(p.id),v=vj(r);return{id:p.id,txt:r.S<=0?'역구배':v>vmax+1e-9?`유속 ${v.toFixed(2)} > ${vmax}`:`유속 ${v.toFixed(2)} < ${vlow}`};});
+  restore();
+  return{changes,before,after,maxDeep,drops,vlow,remain};
 }
 function slopeForV(p,Q,target){
   const nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
@@ -1437,6 +1504,24 @@ $('#bAutoRun').onclick=()=>{const c=parseNumList($('#catCirc').value),b=parseBox
 $('#bAutoClose').onclick=()=>{$('#autoDlg').hidden=true;};
 $('#bAutoApply').onclick=()=>{if(!autoPlan||!autoPlan.changes.length)return;const ch=autoPlan.changes;
   edit(()=>{ch.forEach(c=>{const p=P(c.id);p.D=c.to.D;p.W=c.to.W;});});$('#autoDlg').hidden=true;toast(`관경 ${ch.length}개 관로 조정 (Ctrl+Z로 되돌리기)`);};
+
+/* ---------- 유속·구배 자동 조정 ---------- */
+let slopePlan=null;
+function runSlope(){
+  const storm=!!(doc.rain&&doc.rain.type1>1);
+  const opt={improve:$('#aImp').checked,vlow:+$('#aVlow').value||0,deepen:isFinite(+$('#aDeep').value)?+$('#aDeep').value:0.5,cover:isFinite(+$('#aCover').value)?+$('#aCover').value:0.4};
+  slopePlan=autoSlope(pipes,crit,doc.rain,opt);const a=slopePlan,b=a.before,f=a.after;
+  const rows=a.changes.map(c=>`<tr><td class="l">${esc(c.id)}</td><td>${f2(c.u0)}→${f2(c.u1)}</td><td>${f2(c.d0)}→<b>${f2(c.d1)}</b></td><td>${c.S0.toFixed(1)}→<b>${c.S1.toFixed(1)}</b></td><td>${c.v0.toFixed(2)}→<b>${c.v1.toFixed(2)}</b></td><td class="l">${esc(c.why.join(', '))}</td></tr>`).join('');
+  const st=o=>`역구배 ${o.adverse} · 유속 하한미만 ${o.low} · 유지관리 ${o.maint} · 유속초과 ${o.high} · 통수능NG ${o.ng} · 접합NG ${o.joint}`;
+  $('#slopeBody').innerHTML=(b.ng?`<div class="hint" style="color:var(--bad)">통수능 NG ${b.ng}개가 남아 있습니다. 먼저 [통수능 자동 조정]으로 관경을 키운 뒤 실행하세요.</div>`:'')+`<div class="hint">변경 ${a.changes.length}개 · 가장 많이 깊어진 관저 ${a.maxDeep.toFixed(2)} m · 단차 0.6 m 초과 맨홀 ${a.drops}</div><div class="hint">조정 전: ${st(b)}</div><div class="hint">조정 후: ${st(f)}</div>`+
+    (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>상류 관저</th><th>하류 관저</th><th>경사‰</th><th>유속</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다.</div>')+(a.remain.length?`<div class="hint" style="margin-top:6px">⚠ 조정 후에도 남는 관로 ${a.remain.length}개 — 통수능·최대유속·최소토피 조건이 서로 맞지 않는 경우입니다(관경·단차 구조 검토 필요): ${a.remain.map(r=>esc(r.id)+' ('+esc(r.txt)+')').join(', ')}</div>`:'');
+  $('#bSlopeApply').disabled=!a.changes.length;
+}
+$('#bAuto2').onclick=()=>{const storm=!!(doc.rain&&doc.rain.type1>1);$('#aVlow').value=storm?0.6:crit.vlow;runSlope();$('#slopeDlg').hidden=false;};
+$('#bSlopeRun').onclick=runSlope;
+$('#bSlopeClose').onclick=()=>{$('#slopeDlg').hidden=true;};
+$('#bSlopeApply').onclick=()=>{if(!slopePlan||!slopePlan.changes.length)return;const ch=slopePlan.changes;
+  edit(()=>{ch.forEach(c=>{const p=P(c.id);p.invUp=c.u1;p.invDn=c.d1;});});$('#slopeDlg').hidden=true;toast(`관저고 ${ch.length}개 관로 조정 (Ctrl+Z로 되돌리기)`);};
 const stepD=k=>{const p=P(ui.sel);
   if(isBox(p)){   // 폭과 높이를 같이 0.1 m씩 (폭·높이는 표에서 직접 입력도 가능)
     const H=Math.max(0.3,+(+p.D+0.1*k).toFixed(2)),W=Math.max(0.3,+(+p.W+0.1*k).toFixed(2));edit(()=>{p.D=H;p.W=W;});return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
