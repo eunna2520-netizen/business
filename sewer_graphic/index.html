@@ -193,6 +193,16 @@ button,.tab{touch-action:manipulation}
     <div class="btns"><button id="bApply" class="on">적용</button><button id="bClose">닫기</button></div>
   </div>
 
+  <div class="dlg" id="autoDlg" hidden>
+    <div class="bar"><strong>통수능 자동 조정 (관경 상향)</strong><span class="sub">통수능(여유율)이 부족한 관로의 관경을 규격 목록에서 한 단계씩 키웁니다. 관경은 줄이지 않고, 상류 관경이 하류보다 크지 않도록 하류도 같이 키웁니다. <b>관저고는 그대로</b> 두므로 관경이 커지면 토피가 줄 수 있습니다(토피·유속은 다음 단계에서 조정).</span></div>
+    <div id="autoBody" style="max-height:320px;overflow:auto"></div>
+    <details><summary class="hint">규격 목록 (직접 입력·수정)</summary>
+      <label class="hint">원형 호칭 mm (쉼표) <input id="catCirc" style="width:100%"></label>
+      <label class="hint">BOX 폭x높이 m (쉼표) <textarea id="catBox" spellcheck="false" style="min-height:70px"></textarea></label>
+    </details>
+    <div class="btns"><button id="bAutoRun">다시 계산</button><button id="bAutoApply" class="on">적용</button><button id="bAutoClose">닫기</button></div>
+  </div>
+
   <div class="grid">
     <div class="col">
       <div class="card plan-card">
@@ -206,6 +216,7 @@ button,.tab{touch-action:manipulation}
         <div class="card-h">
           <h2>종단</h2>
           <div class="tabs" id="tabs"></div>
+          <button id="bAuto" title="통수능이 부족한 관로의 관경을 규격 목록에서 자동으로 키우는 제안 (적용 전에 미리보기)">통수능 자동 조정</button>
           <button id="bRange" title="누른 뒤 종단에서 시작·끝 맨홀 두 개를 클릭(탭)하면 그 사이 관저를 한 경사로 일직선 정리. 데스크톱은 Shift+클릭 두 번도 가능">구간 일직선</button>
           <div class="seg" role="group" aria-label="수면 계산"><button id="wU" class="on" title="관로마다 등류(Manning) 수심">등류</button><button id="wG" title="방류구 수위에서 상류로 표준축차법 수면곡선">부등류</button></div>
           <label class="hint" style="display:inline-flex;align-items:center;gap:4px" title="AutoCAD용 종단도(DXF). 가로 H, 세로 V 축척 (예: H=500, V=100)">H 1/<input id="dxfH" type="number" value="500" step="50" min="50" style="width:56px"> V 1/<input id="dxfV" type="number" value="100" step="10" min="10" style="width:52px"><button id="bDxf">DXF</button></label>
@@ -618,6 +629,53 @@ function diagnoseGvf(pipes,out,byUp){
     // 4) 병목: 하류 관 통수능이 80% 이상 사용
     (byUp.get(p.dn)||[]).forEach(d=>{const rd=out.get(d.id);if(rd&&!rd.pump&&rd.use>=0.8&&r.hD>=0.5)hint(p,`하류 ${d.id} 통수능 사용률 ${(rd.use*100).toFixed(0)}%`);});
   });
+}
+
+// ---- 자동 조정: 규격 목록 + 통수능 부족 관경 상향 ----
+const BOX_STD='1.0x0.8,1.0x1.0,1.0x1.2,1.0x1.5,1.2x0.8,1.2x1.0,1.2x1.2,1.2x1.5,1.5x1.0,1.5x1.2,1.5x1.5,1.5x2.0,1.8x1.2,1.8x1.5,1.8x1.8,2.0x1.0,2.0x1.5,2.0x1.8,2.0x2.0,2.3x1.5,2.3x1.8,2.3x2.0,2.3x2.3,2.5x1.5,2.5x1.8,2.5x2.0,2.5x2.5,2.8x1.5,2.8x2.0,2.8x2.5,3.0x1.0,3.0x1.5,3.0x2.0,3.0x2.5,3.5x1.5,3.5x2.0,3.5x2.5,4.0x1.5,4.0x2.0,4.0x2.5';
+const parseBoxList=t=>String(t).split(/[\s,;]+/).map(x=>x.match(/^([\d.]+)[x×*]([\d.]+)$/i)).filter(Boolean).map(m=>[+m[1],+m[2]]).filter(([w,h])=>w>0&&h>0);
+const parseNumList=t=>[...new Set(String(t).split(/[\s,;]+/).map(Number).filter(v=>v>0))].sort((a,b)=>a-b);
+const catalog={circ:[150,200,250,300,350,400,450,500,600,700,800,900,1000,1100,1200,1350,1500],box:parseBoxList(BOX_STD)};
+const areaOf=p=>(isBox(p)?(+p.W)*(+p.D):Math.PI*Math.pow((+p.D)/1000,2)/4)*Math.max(1,+p.nb||1);
+// 통수능(여유율) 부족 관로를 규격 목록에서 한 단계씩 키움. 줄이지 않고, 상류 단면 ≤ 하류 단면 유지. 관저고는 그대로.
+// pipes를 임시로 바꿔 계산한 뒤 원래대로 돌려놓고 제안만 반환
+function autoUpsize(pipes,crit,rain,cat){
+  const orig=new Map(pipes.map(p=>[p.id,{D:p.D,W:p.W}]));
+  const byDn=new Map();pipes.forEach(p=>{if(!byDn.has(p.dn))byDn.set(p.dn,[]);byDn.get(p.dn).push(p);});
+  const dep=new Map(),depth=(p,st=new Set())=>{if(dep.has(p.id))return dep.get(p.id);if(st.has(p.id))return 0;st.add(p.id);let d=0;(byDn.get(p.up)||[]).forEach(q=>{d=Math.max(d,depth(q,st));});st.delete(p.id);dep.set(p.id,d+1);return d+1;};
+  const order=[...pipes].sort((a,b)=>depth(a)-depth(b));
+  const why=new Map(),stuck=new Map();
+  const note=(id,t)=>{const a=why.get(id)||[];if(!a.includes(t))a.push(t);why.set(id,a);};
+  const bump=(p,minArea)=>{
+    const cur=areaOf(p),nb=Math.max(1,+p.nb||1);
+    if(isBox(p)){
+      const c=cat.box.filter(([w,h])=>w>=+p.W-1e-9&&h>=+p.D-1e-9&&w*h*nb>cur+1e-9&&w*h*nb>=minArea-1e-9).sort((a,b)=>a[0]*a[1]-b[0]*b[1]||a[0]+a[1]-b[0]-b[1])[0];
+      if(!c)return false;p.W=c[0];p.D=c[1];return true;
+    }
+    const d=cat.circ.find(x=>x>+p.D&&Math.PI*Math.pow(x/1000,2)/4*nb>=minArea-1e-9);
+    if(d==null)return false;p.D=d;return true;
+  };
+  let it=0,after=null;
+  for(;it<60;it++){
+    const res=compute(pipes,crit,rain);let ch=false;
+    for(const p of order){
+      const r=res.get(p.id);if(r.pump||!(r.Q>0)||r.marginOK)continue;
+      if(!(r.S>0)){stuck.set(p.id,'역구배 — 관경으로 해결 불가');continue;}
+      if(bump(p,0)){note(p.id,'통수능 부족');ch=true;stuck.delete(p.id);}else stuck.set(p.id,'규격 목록의 최대 크기');
+    }
+    for(const p of order){
+      const need=Math.max(0,...(byDn.get(p.up)||[]).map(areaOf));
+      if(areaOf(p)<need-1e-9){if(bump(p,need)){note(p.id,'상류보다 작아 상향');ch=true;}else stuck.set(p.id,'상류보다 작지만 맞는 규격 없음');}
+    }
+    if(!ch)break;
+  }
+  const fin=compute(pipes,crit,rain);
+  const ngNow=pipes.filter(p=>{const r=fin.get(p.id);return !r.pump&&r.Q>0&&!r.marginOK;}).map(p=>p.id);
+  const coverNow=pipes.filter(p=>fin.get(p.id).coverNG).length;
+  const changes=pipes.filter(p=>{const o=orig.get(p.id);return o.D!==p.D||o.W!==p.W;}).map(p=>{const o=orig.get(p.id);return{id:p.id,box:isBox(p),from:{D:o.D,W:o.W},to:{D:p.D,W:p.W},why:why.get(p.id)||[]};});
+  pipes.forEach(p=>{const o=orig.get(p.id);p.D=o.D;p.W=o.W;});
+  const before=compute(pipes,crit,rain);
+  return{changes,ngNow,stuck:[...stuck].filter(([id])=>ngNow.includes(id)||true),iter:it,coverBefore:pipes.filter(p=>before.get(p.id).coverNG).length,coverAfter:coverNow,ngBefore:pipes.filter(p=>{const r=before.get(p.id);return !r.pump&&r.Q>0&&!r.marginOK;}).length};
 }
 function slopeForV(p,Q,target){
   const nb=Math.max(1,+p.nb||1),n=+p.n||0.013;
@@ -1362,6 +1420,23 @@ $('#bAutoD').onclick=()=>{const p=P(ui.sel),orig=p.D;
   for(const d of DIAS){p.D=d;const r=compute(pipes,crit,doc.rain).get(p.id);if(r.use<=1){pick=d;break;}}
   p.D=orig;if(pick===orig){toast('현재 관경이 최소 적합 관경입니다');return;}
   edit(()=>{p.D=pick;});toast(`${p.id} 관경 D${orig} → D${pick}`);};
+
+/* ---------- 통수능 자동 조정 ---------- */
+let autoPlan=null;
+const secStr=(b,v)=>b?`□${(+v.W).toFixed(2)}×${(+v.D).toFixed(2)}`:`D${v.D}`;
+function runAuto(){
+  autoPlan=autoUpsize(pipes,crit,doc.rain,catalog);
+  const a=autoPlan,rows=a.changes.map(c=>`<tr><td class="l">${esc(c.id)}</td><td>${secStr(c.box,c.from)}</td><td>→</td><td><b>${secStr(c.box,c.to)}</b></td><td class="l">${esc(c.why.join(', '))}</td></tr>`).join('');
+  const stuck=a.stuck.map(([id,t])=>`<div class="hint">⚠ ${esc(id)}: ${esc(t)}</div>`).join('');
+  $('#autoBody').innerHTML=`<div class="hint">변경 ${a.changes.length}개 · 통수능 NG ${a.ngBefore} → ${a.ngNow.length} · 토피 부족 ${a.coverBefore} → ${a.coverAfter} (관저고 유지)</div>`+
+    (rows?`<table style="width:100%"><thead><tr><th class="l">관로</th><th>현재</th><th></th><th>제안</th><th class="l">사유</th></tr></thead><tbody>${rows}</tbody></table>`:'<div class="hint">바꿀 관로가 없습니다.</div>')+stuck;
+  $('#bAutoApply').disabled=!a.changes.length;
+}
+$('#bAuto').onclick=()=>{$('#catCirc').value=catalog.circ.join(', ');$('#catBox').value=catalog.box.map(([w,h])=>`${w}x${h}`).join(', ');runAuto();$('#autoDlg').hidden=false;};
+$('#bAutoRun').onclick=()=>{const c=parseNumList($('#catCirc').value),b=parseBoxList($('#catBox').value);if(c.length)catalog.circ=c;if(b.length)catalog.box=b;runAuto();};
+$('#bAutoClose').onclick=()=>{$('#autoDlg').hidden=true;};
+$('#bAutoApply').onclick=()=>{if(!autoPlan||!autoPlan.changes.length)return;const ch=autoPlan.changes;
+  edit(()=>{ch.forEach(c=>{const p=P(c.id);p.D=c.to.D;p.W=c.to.W;});});$('#autoDlg').hidden=true;toast(`관경 ${ch.length}개 관로 조정 (Ctrl+Z로 되돌리기)`);};
 const stepD=k=>{const p=P(ui.sel);
   if(isBox(p)){   // 폭과 높이를 같이 0.1 m씩 (폭·높이는 표에서 직접 입력도 가능)
     const H=Math.max(0.3,+(+p.D+0.1*k).toFixed(2)),W=Math.max(0.3,+(+p.W+0.1*k).toFixed(2));edit(()=>{p.D=H;p.W=W;});return;}const i=DIAS.indexOf(p.D);const j=i<0?DIAS.findIndex(d=>d>p.D):i+k;if(j<0||j>=DIAS.length)return;edit(()=>{p.D=DIAS[j];});};
