@@ -314,7 +314,7 @@ button,.tab{touch-action:manipulation}
         </div>
         <div class="scroll" id="profWrap"><svg id="profLbl" aria-hidden="true"></svg><svg id="prof" aria-label="종단면도"></svg></div>
         <div class="nodewrap" id="nodeWrap" hidden><table id="nodeTbl"></table></div>
-        <div class="bandbar"><div class="seg" role="group" aria-label="표 보기"><button id="bmA" class="on" title="종단도 가로축에 맞춰 맨홀 위치에 값을 표시">종단 정렬</button><button id="bmG" title="맨홀을 같은 간격 열로 늘어놓은 표 (맨홀 번호가 맨 위, 왼쪽 항목 고정)">맨홀별 표</button></div><div class="hint">종단도 아래 표의 <b>지반고 · 관저고 · 토피 · 경사</b> 값을 누르면 그 자리에서 바로 고칠 수 있습니다 (<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 칸 이동 · <kbd>Ctrl</kbd>+<kbd>↑</kbd><kbd>↓</kbd> 값 ±0.01 (경사 ±0.1, <kbd>Shift</kbd> 10배) · Enter 확정 · <kbd>Esc</kbd> 처음 값으로 되돌리고 닫기)</div></div>
+        <div class="bandbar"><div class="seg" role="group" aria-label="표 보기"><button id="bmA" class="on" title="종단도 가로축에 맞춰 맨홀 위치에 값을 표시">종단 정렬</button><button id="bmG" title="맨홀을 같은 간격 열로 늘어놓은 표 (맨홀 번호가 맨 위, 왼쪽 항목 고정)">맨홀별 표</button><button id="bmL" title="항목이 표 위쪽, 맨홀 번호가 왼쪽 (맨홀 한 줄씩)">가로배열 표</button></div><div class="hint">종단도 아래 표의 <b>지반고 · 관저고 · 토피 · 경사</b> 값을 누르면 그 자리에서 바로 고칠 수 있습니다 (<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> 칸 이동 · <kbd>Ctrl</kbd>+<kbd>↑</kbd><kbd>↓</kbd> 값 ±0.01 (경사 ±0.1, <kbd>Shift</kbd> 10배) · Enter 확정 · <kbd>Esc</kbd> 처음 값으로 되돌리고 닫기)</div></div>
       </div>
       <div class="card plan-card">
         <div class="card-h"><h2 id="planTitle">관망 평면 (모식도)</h2><div class="sp"></div>
@@ -1401,7 +1401,7 @@ function renderProfile(){
   const fitPx=(fitW-PROF.L0-20-PROF.R0)/g.total;
   const pxm=ui.hz||Math.max(fitPx,Math.min(3,70/avgL));ui.pxm=pxm;ui.fitPx=fitPx;
   const W=Math.round(Math.max(fitW,PROF.L0+20+PROF.R0+g.total*pxm)),bandRows=['맨홀','지반고','관저고 유입','관저고 유출','토피','연장 m','경사 ‰','관경 mm',ui.view==='cap'?'유량비 %':'유속 m/s','판정','공법'];
-  const gridMode=ui.bandMode==='grid';
+  const gridMode=ui.bandMode==='grid'||ui.bandMode==='list';
   const bandTop=top+PH+22,H=gridMode?bandTop-6:bandTop+bandRows.length*row+6;   // 표 모드: 아래 데이터 밴드는 잘라냄
   svg.setAttribute('width',W);svg.setAttribute('height',H);svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   // 가로 1 m 당 화면 px(실제 적용값)과 세로 배율: 세로 = 가로 × H/V 로 고정 (확대·축소해도 H:V 비율은 그대로)
@@ -2217,8 +2217,10 @@ function renderTable(){
 
 // 맨홀별 표: 맨홀을 같은 간격의 열로 늘어놓은 표 (맨홀 번호 맨 위 · 왼쪽 항목 열 고정). 칸 편집은 종단 정렬 표와 같은 방식
 function renderNodeTbl(){
-  const grid=ui.bandMode==='grid';$('#nodeWrap').hidden=!grid;$('#bmA').classList.toggle('on',!grid);$('#bmG').classList.toggle('on',grid);
+  const mode=ui.bandMode==='grid'||ui.bandMode==='list'?ui.bandMode:'aligned',grid=mode!=='aligned';
+  $('#nodeWrap').hidden=!grid;$('#bmA').classList.toggle('on',!grid);$('#bmG').classList.toggle('on',mode==='grid');$('#bmL').classList.toggle('on',mode==='list');
   if(!grid)return;
+  if(mode==='list'){renderNodeList();return;}
   const ch=routes.get(ui.route)||[],nodes=[ch[0].up,...ch.map(p=>p.dn)];
   const cap=ui.view==='cap';
   const col=(i,cls='')=>`${(ch[i]&&ch[i].id===ui.sel)||(i>0&&ch[i-1].id===ui.sel&&false)?'sel ':''}${cls}`;
@@ -2241,8 +2243,33 @@ function renderNodeTbl(){
     '</tbody>';
   $('#nodeTbl').innerHTML=h;
 }
+
+// 가로배열 표: 항목이 위쪽, 맨홀 번호가 왼쪽 (맨홀 한 줄씩)
+function renderNodeList(){
+  const ch=routes.get(ui.route)||[],nodes=[ch[0].up,...ch.map(p=>p.dn)],cap=ui.view==='cap';
+  const cov=(pin,pout)=>{const c=[];if(pin)c.push(res.get(pin.id).covDn);if(pout)c.push(res.get(pout.id).covUp);return Math.min(...c);};
+  const head=['맨홀','지반고 m','관저고 유입','관저고 유출','토피 m','하류 관로','연장 m','경사 ‰','관경 mm',cap?'유량비 %':'유속 m/s','판정','공법'];
+  let h='<thead><tr>'+head.map((t,k)=>`<th class="${k===0?'rowh':''}">${t}</th>`).join('')+'</tr></thead><tbody>';
+  nodes.forEach((n,i)=>{
+    const pin=ch[i-1],pout=ch[i],r=pout?res.get(pout.id):null,sel=pout&&pout.id===ui.sel;
+    const ed=(k,t,st='',ok=true)=>ok?`<td class="ed${sel?' sel':''}" data-ek="${k}" data-ei="${i}"${st?` style="${st}"`:''}>${t}</td>`:`<td class="${sel?'sel':''}">${t}</td>`;
+    const pc=(t,st='')=>`<td class="${sel?'sel':''}"${st?` style="${st}"`:''}>${t}</td>`;
+    const c=cov(pin,pout);
+    h+=`<tr><th class="rowh ${sel?'sel':''}" data-hi="${i}" style="cursor:pointer" title="이 맨홀에서 시작하는 관로 선택">${esc(String(n))}</th>`+
+      ed('gh',f2(pout?pout.ghUp:pin.ghDn))+
+      (pin?ed('invDn',f2(pin.invDn),res.get(pin.id).joint?'color:var(--bad)':''):ed('invDn','—','',false))+
+      (pout?ed('invUp',f2(pout.invUp)):ed('invUp','—','',false))+
+      ed('cov',f2(c),c<crit.cover?'color:var(--warn);font-weight:600':'')+
+      (pout?pc(esc(pout.id),'font-weight:600')+pc(pout.L.toFixed(1))+ed('S',r.S.toFixed(2),r.S<=0?'color:var(--bad)':'')+pc(isBox(pout)?secLabel(pout).slice(1):pout.D+(pout.nb>1?`×${pout.nb}`:''))+
+        (cap?pc(isFinite(r.qr)?(r.qr*100).toFixed(1):'—',`color:var(--${stCls(capSt(r))});font-weight:600`):pc(r.V.toFixed(2),`color:var(--${stCls(r.st)});font-weight:600`))+
+        pc(`<span class="remark ${stCls(r.st)}">${esc(r.rem[0])}</span>`)+pc(esc(pout.code||'')+((pout.st||[]).some(t=>(t.code??pout.code)!==pout.code)?'*':''),isProt(pout.code)?'color:var(--accent);font-weight:600':'')
+       :'<td colspan="7" style="color:var(--muted)">(방류 끝 맨홀)</td>')+'</tr>';
+  });
+  $('#nodeTbl').innerHTML=h+'</tbody>';
+}
 $('#bmA').onclick=()=>{closeCellEd();ui.bandMode='aligned';render();};
 $('#bmG').onclick=()=>{closeCellEd();ui.bandMode='grid';render();};
+$('#bmL').onclick=()=>{closeCellEd();ui.bandMode='list';render();};
 $('#nodeTbl').addEventListener('click',e=>{
   const td=e.target.closest('td[data-ek]');if(td){openCellEd(td.dataset.ek,+td.dataset.ei);return;}
   const th=e.target.closest('th[data-hi]');if(th){const ch=routes.get(ui.route)||[],p=ch[+th.dataset.hi]||ch[ch.length-1];if(p){ui.sel=p.id;ui.handle={pid:p.id,end:'dn'};render();}}
@@ -2261,14 +2288,18 @@ function applyCellRaw(k,i,v){
 const CELL_ROWS=['gh','invDn','invUp','cov','S'];
 // 입력칸 열기. 방향키 = 셀 이동, Ctrl+↑↓ = 값 증감(바로 화면에 반영, Shift 10배), Enter 확정, Esc = 처음 값으로 되돌리고 닫기
 function openCellEd(k,i){
-  const grid=ui.bandMode==='grid',pre=grid?'#nodeTbl ':'#prof ',tag=grid?'td':'text';
+  const grid=ui.bandMode==='grid'||ui.bandMode==='list',list=ui.bandMode==='list',pre=grid?'#nodeTbl ':'#prof ',tag=grid?'td':'text';
   const t=document.querySelector(`${pre}${tag}[data-ek="${k}"][data-ei="${i}"]`);if(!t)return false;
   const wrap=grid?$('#nodeWrap'):$('#profWrap'),wr=wrap.getBoundingClientRect(),tr=t.getBoundingClientRect();
   closeCellEd();
   const inp=document.createElement('input');inp.className='cellEd';inp.type='text';inp.inputMode='decimal';inp.value=t.textContent.trim();
   if(grid){inp.style.width=Math.max(60,tr.width-6)+'px';inp.style.left=(tr.left-wr.left+wrap.scrollLeft+3)+'px';inp.style.top=(tr.top-wr.top+wrap.scrollTop+(tr.height-22)/2)+'px';}
   else{inp.style.left=(tr.left-wr.left+wrap.scrollLeft+tr.width/2-32)+'px';inp.style.top=(tr.top-wr.top+wrap.scrollTop-3)+'px';}
-  if(grid){const c=wrap.scrollLeft,rb=tr.right-wr.right,lb=wr.left+110-tr.left;if(rb>0)wrap.scrollLeft+=rb+8;else if(lb>0)wrap.scrollLeft-=lb;}
+  if(grid){   // 칸이 가려지면 스크롤해서 보이게 (왼쪽 항목 열·위쪽 머리줄 아래로 들어가지 않게)
+    const rb=tr.right-wr.right,lb=wr.left+(list?90:110)-tr.left,bb=tr.bottom-wr.bottom,tb=wr.top+34-tr.top;
+    if(rb>0)wrap.scrollLeft+=rb+8;else if(lb>0)wrap.scrollLeft-=lb;
+    if(bb>0)wrap.scrollTop+=bb+6;else if(tb>0)wrap.scrollTop-=tb;
+  }
   wrap.appendChild(inp);cellEd=inp;inp.focus();inp.select();
   const orig=inp.value,base=snapshot();let touched=false;
   const preview=v=>{pipes=JSON.parse(base);applyCellRaw(k,i,v);applyRange();touched=true;render();};   // 기록 없이 화면만 갱신
@@ -2298,11 +2329,14 @@ function openCellEd(k,i){
       inp.value=nv.toFixed(2);preview(nv);
     }
     else if(ev.key==='ArrowLeft'||ev.key==='ArrowRight'||ev.key==='Tab'){
-      const dir=ev.key==='ArrowLeft'||(ev.key==='Tab'&&ev.shiftKey)?-1:1,n=near(dir);if(n==null)return;
-      ev.preventDefault();go(k,n);
+      const dir=ev.key==='ArrowLeft'||(ev.key==='Tab'&&ev.shiftKey)?-1:1;
+      if(list){const nk=vert(dir);if(!nk)return;ev.preventDefault();go(nk,i);}   // 가로배열 표: 같은 맨홀 줄에서 옆 항목 칸
+      else{const n=near(dir);if(n==null)return;ev.preventDefault();go(k,n);}
     }
     else if(ev.key==='ArrowUp'||ev.key==='ArrowDown'){
-      const nk=vert(ev.key==='ArrowUp'?-1:1);if(!nk)return;ev.preventDefault();go(nk,i);
+      const dir=ev.key==='ArrowUp'?-1:1;
+      if(list){const n=near(dir);if(n==null)return;ev.preventDefault();go(k,n);}    // 가로배열 표: 같은 항목의 위/아래 맨홀 칸
+      else{const nk=vert(dir);if(!nk)return;ev.preventDefault();go(nk,i);}
     }
   });
   inp.addEventListener('blur',()=>{if(cellEd===inp)finish();});
